@@ -1,0 +1,6 @@
+{
+  "name": "PolyVerses Product Suite",
+  "description": "Interactive Agentic Product Management Workbench and complete production-ready multi-agent codebase for PolyVerses.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

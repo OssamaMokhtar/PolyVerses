@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-brand-cyan: #00A3FF;
+  --color-brand-blue: #00A3FF;
+  --color-brand-emerald: #10B981;
+  --color-brand-amber: #F59E0B;
+  --color-brand-rose: #EF4444;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', Courier, monospace;
+}
+
+body {
+  background-color: #0C0C0E;
+  color: #E4E4E7;
+  font-family: var(--font-sans);
+}
+
+/* Custom styles for the Sophisticated Dark theme */
+.status-pill {
+  background: rgba(0, 163, 255, 0.1);
+  border: 1px solid rgba(0, 163, 255, 0.3);
+  color: #60C5FF;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.agent-card {
+  background: linear-gradient(145deg, #16161A 0%, #0F0F12 100%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+}
+
+.agent-card:hover {
+  border-color: rgba(0, 163, 255, 0.2);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+}
+
+.gate-active {
+  border-left: 4px solid #F59E0B;
+  background: rgba(245, 158, 11, 0.03);
+}
+
+.data-value {
+  font-family: var(--font-mono);
+  color: #10B981;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0C0C0E;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272A;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3F3F46;
+}
+
