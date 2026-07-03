@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Onboarding } from './components/Onboarding';
 import { OrchestrationConsole } from './components/OrchestrationConsole';
 import { CodeBrowser } from './components/CodeBrowser';
 import { PromptConsole } from './components/PromptConsole';
 import { ObservabilityDashboard } from './components/ObservabilityDashboard';
 import { 
-  Terminal, FolderCode, Sparkles, Activity, Shield, Slack, FileSpreadsheet, Radio, Cpu
+  Terminal, FolderCode, Sparkles, Activity, Shield, Slack, FileSpreadsheet, Radio, Cpu, LogOut
 } from 'lucide-react';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function App() {
   const [onboarded, setOnboarded] = useState(false);
@@ -18,15 +21,65 @@ export default function App() {
     jiraConnected: false,
   });
 
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'workbench' | 'codebase' | 'prompts' | 'observability'>('workbench');
 
-  const handleOnboardingComplete = (config: typeof productConfig) => {
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.productConfig) {
+              setProductConfig(data.productConfig);
+              setOnboarded(true);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to load user profile:", err);
+        }
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleOnboardingComplete = async (config: typeof productConfig) => {
     setProductConfig(config);
     setOnboarded(true);
+
+    if (auth.currentUser) {
+      try {
+        const userRef = doc(db, 'users', auth.currentUser.uid);
+        await setDoc(userRef, {
+          uid: auth.currentUser.uid,
+          email: auth.currentUser.email || '',
+          displayName: auth.currentUser.displayName || '',
+          productConfig: config,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${auth.currentUser.uid}`);
+      }
+    }
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0C0C0E] text-[#E4E4E7] flex flex-col items-center justify-center p-4 border-[10px] border-[#1A1A1E]">
+        <Cpu className="w-10 h-10 text-[#00A3FF] animate-spin mb-4" />
+        <span className="font-mono text-xs text-[#00A3FF] tracking-widest uppercase">Loading PolyVerses Secure Node...</span>
+      </div>
+    );
+  }
+
   if (!onboarded) {
-    return <Onboarding onComplete={handleOnboardingComplete} />;
+    return <Onboarding currentUser={currentUser} onComplete={handleOnboardingComplete} />;
   }
 
   return (
@@ -86,6 +139,28 @@ export default function App() {
             <Radio className="w-3 h-3 shrink-0" />
             <span>ONLINE</span>
           </div>
+
+          {/* Real Firebase Logout Button */}
+          {currentUser && (
+            <button
+              onClick={async () => {
+                await signOut(auth);
+                setOnboarded(false);
+                setProductConfig({
+                  productName: 'Nexus Retail Hub',
+                  productDescription: 'An omnichannel workspace isolating payment queues, syncing data repositories, and verifying user consent terms.',
+                  role: 'PM',
+                  slackConnected: false,
+                  jiraConnected: false,
+                });
+              }}
+              className="status-pill text-[#EF4444] px-2.5 py-1 flex items-center space-x-1 bg-[#EF4444]/10 border border-[#EF4444]/30 rounded cursor-pointer hover:bg-[#EF4444]/20 transition text-xs font-medium font-sans"
+              title="Sign Out of PolyVerses Session"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Log Out</span>
+            </button>
+          )}
         </div>
       </header>
 

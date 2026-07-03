@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloudfire.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net - Default Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY PRIMITIVES & HELPERS ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- VALIDATION BLUEPRINTS ---
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
+             (!('productConfig' in data) || (data.productConfig is map)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidDocument(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.content is string && data.content.size() <= 200000 &&
+             (!('title' in data) || (data.title is string && data.title.size() <= 256)) &&
+             (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 5000)) &&
+             (!('agentType' in data) || (data.agentType is string && data.agentType.size() <= 64)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    // --- COLLECTIONS ---
+
+    // Collection: users/{userId}
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidUser(incoming()) &&
+                       incoming().uid == userId &&
+                       incoming().createdAt == request.time;
+                       
+      allow update: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidUser(incoming()) &&
+                       incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt == request.time;
+                       
+      allow delete: if isOwner(userId);
+    }
+
+    // Subcollection: users/{userId}/documents/{docId}
+    match /users/{userId}/documents/{docId} {
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidId(docId) && 
+                       isValidDocument(incoming()) &&
+                       incoming().id == docId &&
+                       incoming().userId == userId &&
+                       incoming().createdAt == request.time;
+                       
+      allow update: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidId(docId) && 
+                       isValidDocument(incoming()) &&
+                       incoming().id == existing().id &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt;
+                       
+      allow delete: if isOwner(userId);
+    }
+  }
+}

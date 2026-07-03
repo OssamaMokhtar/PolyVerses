@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, ShieldAlert, Cpu, CheckCircle2, AlertCircle, Hourglass, 
@@ -8,6 +8,18 @@ import {
 import { Agent, WorkflowStep, HumanGate, ConflictResolution } from '../types';
 import { AgentNetworkDiagram } from './AgentNetworkDiagram';
 import { RechartsHeatmap } from './RechartsHeatmap';
+import { auth, db } from '../firebase';
+import { collection, query, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
+
+interface SavedDocument {
+  id: string;
+  userId: string;
+  title: string;
+  prompt: string;
+  agentType: string;
+  content: string;
+  createdAt: any;
+}
 
 interface OrchestrationConsoleProps {
   productName: string;
@@ -278,6 +290,58 @@ const INITIAL_AGENTS: Agent[] = [
 
 export function OrchestrationConsole({ productName, productDescription, activeRole }: OrchestrationConsoleProps) {
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
+  const [savedDocs, setSavedDocs] = useState<SavedDocument[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+
+  useEffect(() => {
+    if (!auth.currentUser) {
+      setSavedDocs([]);
+      return;
+    }
+    setLoadingDocs(true);
+    const docsQuery = query(
+      collection(db, 'users', auth.currentUser.uid, 'documents'),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(docsQuery, (snapshot) => {
+      const docsList: SavedDocument[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        docsList.push({
+          id: docSnap.id,
+          userId: data.userId,
+          title: data.title || 'Untitled Document',
+          prompt: data.prompt || '',
+          agentType: data.agentType || 'prd',
+          content: data.content || '',
+          createdAt: data.createdAt,
+        });
+      });
+      setSavedDocs(docsList);
+      setLoadingDocs(false);
+    }, (error) => {
+      console.error("Failed to fetch saved documents: ", error);
+      setLoadingDocs(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleDeleteDoc = async (docId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!auth.currentUser) return;
+    if (confirm("Are you sure you want to delete this saved deliverable from Firestore?")) {
+      try {
+        const docRef = doc(db, 'users', auth.currentUser.uid, 'documents', docId);
+        await deleteDoc(docRef);
+        addLog(`[Ledger] Deleted saved document (id: ${docId})`);
+      } catch (err) {
+        console.error("Failed to delete document:", err);
+      }
+    }
+  };
+
   const [promptInput, setPromptInput] = useState('Connect real-time Slack and Jira sync boards to trace compliance checks automatically');
   const [prioritySetting, setPrioritySetting] = useState<'High' | 'Medium' | 'Low'>('Medium');
   const [roleSetting, setRoleSetting] = useState<string>(activeRole);
@@ -638,6 +702,27 @@ export function OrchestrationConsole({ productName, productDescription, activeRo
       setEvaluationResult(data.text);
       updateAgentStatus('prd_generation', 'completed');
 
+      // Auto-save generated PRD to Firebase Firestore
+      if (auth.currentUser) {
+        try {
+          const { setDoc, serverTimestamp } = await import('firebase/firestore');
+          const docId = `prd-${Date.now()}`;
+          const docRef = doc(db, 'users', auth.currentUser.uid, 'documents', docId);
+          await setDoc(docRef, {
+            id: docId,
+            userId: auth.currentUser.uid,
+            title: `PRD: ${promptInput.split(' ').slice(0, 5).join(' ')}...`,
+            prompt: promptInput + finalPromptAddition,
+            agentType: 'prd',
+            content: data.text,
+            createdAt: serverTimestamp(),
+          });
+          addLog(`[Ledger] PRD deliverable successfully saved to Firestore.`);
+        } catch (firebaseErr) {
+          console.error("Firebase save error:", firebaseErr);
+        }
+      }
+
       // Step 4: SRE Rollback Monitor
       await delay(1000);
       updateAgentStatus('rollback_orchestrator', 'running');
@@ -751,84 +836,153 @@ export function OrchestrationConsole({ productName, productDescription, activeRo
         <p className="text-sm text-[#A1A1AA] mt-2 leading-relaxed max-w-3xl">{productDescription}</p>
       </div>
 
-      {/* Trigger Workbench Panel */}
-      <div className="bg-[#121215]/85 border border-[#27272A] rounded-2xl p-6 shadow-lg">
-        <h3 className="text-lg font-sans font-bold text-[#F4F4F5] mb-4 flex items-center space-x-2">
-          <Terminal className="w-5 h-5 text-[#00A3FF]" />
-          <span>Command Desk Console</span>
-        </h3>
+      {/* Dynamic Grid for Workspace Operations */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Left Column (2 Span) - Command Desk Console */}
+        <div className="lg:col-span-2">
+          <div className="bg-[#121215]/85 border border-[#27272A] rounded-2xl p-6 shadow-lg h-full">
+            <h3 className="text-lg font-sans font-bold text-[#F4F4F5] mb-4 flex items-center space-x-2">
+              <Terminal className="w-5 h-5 text-[#00A3FF]" />
+              <span>Command Desk Console</span>
+            </h3>
 
-        <div className="space-y-5">
-          <div>
-            <label className="block text-[10px] font-mono text-[#71717A] uppercase tracking-wider mb-2 font-semibold">Feature Idea / Problem Signal Input</label>
-            <textarea
-              rows={3}
-              value={promptInput}
-              onChange={(e) => setPromptInput(e.target.value)}
-              className="w-full bg-[#0C0C0E] border border-[#27272A] rounded-xl px-4 py-3 text-[#E4E4E7] text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-[#00A3FF] focus:border-[#00A3FF] transition"
-              placeholder="e.g. Map out custom compliance rules on Firestore, and sync outputs with Jira backlegs..."
-              disabled={isRunning || isEvaluating}
-            />
-          </div>
+            <div className="space-y-5">
+              <div>
+                <label className="block text-[10px] font-mono text-[#71717A] uppercase tracking-wider mb-2 font-semibold">Feature Idea / Problem Signal Input</label>
+                <textarea
+                  rows={3}
+                  value={promptInput}
+                  onChange={(e) => setPromptInput(e.target.value)}
+                  className="w-full bg-[#0C0C0E] border border-[#27272A] rounded-xl px-4 py-3 text-[#E4E4E7] text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-[#00A3FF] focus:border-[#00A3FF] transition"
+                  placeholder="e.g. Map out custom compliance rules on Firestore, and sync outputs with Jira backlegs..."
+                  disabled={isRunning || isEvaluating}
+                />
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Priority Settings */}
-            <div>
-              <label className="block text-[10px] font-mono text-[#71717A] uppercase tracking-wider mb-2 font-semibold">Priority Execution Lane</label>
-              <div className="flex bg-[#0C0C0E] p-1 rounded-lg border border-[#27272A]">
-                {(['Low', 'Medium', 'High'] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setPrioritySetting(p)}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded uppercase tracking-wider transition duration-150 cursor-pointer ${
-                      prioritySetting === p ? 'bg-[#00A3FF] text-black font-bold h-full' : 'text-[#71717A] hover:text-[#E4E4E7]'
-                    }`}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Priority Settings */}
+                <div>
+                  <label className="block text-[10px] font-mono text-[#71717A] uppercase tracking-wider mb-2 font-semibold">Priority Execution Lane</label>
+                  <div className="flex bg-[#0C0C0E] p-1 rounded-lg border border-[#27272A]">
+                    {(['Low', 'Medium', 'High'] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setPrioritySetting(p)}
+                        className={`flex-1 py-1.5 text-xs font-semibold rounded uppercase tracking-wider transition duration-150 cursor-pointer ${
+                          prioritySetting === p ? 'bg-[#00A3FF] text-black font-bold h-full' : 'text-[#71717A] hover:text-[#E4E4E7]'
+                        }`}
+                        disabled={isRunning || isEvaluating}
+                      >
+                        {p} Lane
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Impersonated role matrix */}
+                <div>
+                  <label className="block text-[10px] font-mono text-[#71717A] uppercase tracking-wider mb-2 font-semibold">Impersonated Role (RBAC Testing)</label>
+                  <select
+                    value={roleSetting}
+                    onChange={(e) => setRoleSetting(e.target.value)}
+                    className="w-full bg-[#0C0C0E] border border-[#27272A] rounded-lg px-3 py-2 text-xs text-[#E4E4E7] focus:outline-none focus:ring-1 focus:ring-[#00A3FF] cursor-pointer"
                     disabled={isRunning || isEvaluating}
                   >
-                    {p} Lane
+                    <option value="CPO">Chief Product Officer (CPO) [All Overrides]</option>
+                    <option value="Group PM">Group PM [Medium-High Overrides]</option>
+                    <option value="PM">Product Manager (PM) [Standard Ops]</option>
+                    <option value="Product Ops">Product Operations [Auditor View Only]</option>
+                  </select>
+                </div>
+
+                {/* Launch button */}
+                <div className="flex items-end">
+                  <button
+                    onClick={handleStartWorkflow}
+                    disabled={isRunning || isEvaluating || !promptInput.trim()}
+                    className="w-full h-10 bg-[#00A3FF] hover:bg-[#00A3FF]/90 disabled:opacity-50 text-black font-bold uppercase tracking-wider rounded-lg text-xs transition flex items-center justify-center space-x-2 shadow-lg shadow-[#00A3FF]/10 cursor-pointer"
+                  >
+                    {isRunning ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Orchestrating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 text-black fill-current" />
+                        <span>Run Multi-Agent Lane</span>
+                      </>
+                    )}
                   </button>
-                ))}
+                </div>
               </div>
-            </div>
-
-            {/* Impersonated role matrix */}
-            <div>
-              <label className="block text-[10px] font-mono text-[#71717A] uppercase tracking-wider mb-2 font-semibold">Impersonated Role (RBAC Testing)</label>
-              <select
-                value={roleSetting}
-                onChange={(e) => setRoleSetting(e.target.value)}
-                className="w-full bg-[#0C0C0E] border border-[#27272A] rounded-lg px-3 py-2 text-xs text-[#E4E4E7] focus:outline-none focus:ring-1 focus:ring-[#00A3FF] cursor-pointer"
-                disabled={isRunning || isEvaluating}
-              >
-                <option value="CPO">Chief Product Officer (CPO) [All Overrides]</option>
-                <option value="Group PM">Group PM [Medium-High Overrides]</option>
-                <option value="PM">Product Manager (PM) [Standard Ops]</option>
-                <option value="Product Ops">Product Operations [Auditor View Only]</option>
-              </select>
-            </div>
-
-            {/* Launch button */}
-            <div className="flex items-end">
-              <button
-                onClick={handleStartWorkflow}
-                disabled={isRunning || isEvaluating || !promptInput.trim()}
-                className="w-full h-10 bg-[#00A3FF] hover:bg-[#00A3FF]/90 disabled:opacity-50 text-black font-bold uppercase tracking-wider rounded-lg text-xs transition flex items-center justify-center space-x-2 shadow-lg shadow-[#00A3FF]/10 cursor-pointer"
-              >
-                {isRunning ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Orchestrating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4 text-black fill-current" />
-                    <span>Run Multi-Agent Lane</span>
-                  </>
-                )}
-              </button>
             </div>
           </div>
         </div>
+
+        {/* Right Column (1 Span) - Saved Deliverables Ledger */}
+        <div className="lg:col-span-1">
+          <div className="bg-[#121215]/85 border border-[#27272A] rounded-2xl p-6 shadow-lg flex flex-col h-full justify-between">
+            <div>
+              <h3 className="text-lg font-sans font-bold text-[#F4F4F5] mb-4 flex items-center space-x-2">
+                <Save className="w-5 h-5 text-[#00A3FF]" />
+                <span>Deliverables Ledger</span>
+              </h3>
+
+              {savedDocs.length === 0 ? (
+                <div className="py-12 px-4 text-center text-xs text-[#71717A] border border-dashed border-[#27272A] rounded-xl bg-[#0C0C0E]/50">
+                  <Hourglass className="w-6 h-6 mx-auto mb-2 text-[#71717A]/60 animate-pulse" />
+                  <p className="font-semibold text-[#E4E4E7] mb-1">No saved specs yet</p>
+                  <p className="text-[10px] text-[#71717A] leading-relaxed">Run a multi-agent lane to automatically save your generated PRDs to Firestore.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[160px] overflow-y-auto pr-1">
+                  {savedDocs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      onClick={() => {
+                        setEvaluationResult(doc.content);
+                        setPromptInput(doc.prompt || '');
+                        addLog(`[Ledger] Loaded saved deliverable: ${doc.title}`);
+                      }}
+                      className="p-3 bg-[#0C0C0E] hover:bg-[#16161A] border border-[#27272A] hover:border-[#00A3FF]/45 rounded-xl cursor-pointer transition flex items-start justify-between group"
+                    >
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-semibold text-[#F4F4F5] group-hover:text-[#00A3FF] transition line-clamp-1 pr-2 text-left">
+                          {doc.title}
+                        </h4>
+                        <div className="flex items-center space-x-2 text-[9px] font-mono text-[#71717A]">
+                          <span className="px-1 bg-[#00A3FF]/10 text-[#60C5FF] rounded uppercase text-[8px]">
+                            {doc.agentType}
+                          </span>
+                          <span>
+                            {doc.createdAt?.seconds 
+                              ? new Date(doc.createdAt.seconds * 1000).toLocaleDateString()
+                              : 'Just now'
+                            }
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteDoc(doc.id, e)}
+                        className="text-[#71717A] hover:text-[#EF4444] p-1 rounded hover:bg-[#EF4444]/10 transition cursor-pointer"
+                        title="Delete Deliverable"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="mt-4 pt-4 border-t border-[#27272A] text-[10px] font-mono text-[#71717A] flex items-center justify-between">
+              <span>Cloud State: Verified</span>
+              <span className="text-[#10B981]">● Active</span>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       {/* Dual Grid: Execution Status & Real-time Terminal Log */}

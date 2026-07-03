@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "userProfile": {
+      "title": "UserProfile",
+      "description": "User profile containing name, email, and product workbench configuration",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "productConfig": {
+          "type": "object"
+        },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "document": {
+      "title": "Document",
+      "description": "SRE logs, generated PRDs, compliance reports, and other workspace outputs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "prompt": { "type": "string" },
+        "agentType": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "content"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "userProfile",
+      "description": "Protected user profile containing onboarding details and product workbench configuration"
+    },
+    "users/{userId}/documents/{docId}": {
+      "schema": "document",
+      "description": "User specific generated output documents"
+    }
+  }
+}

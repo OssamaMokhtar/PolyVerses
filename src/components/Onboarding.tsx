@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Slack, FileSpreadsheet, Lock, UserCheck, ShieldAlert, Cpu, Sparkles, Check, ChevronRight } from 'lucide-react';
+import { auth, googleProvider } from '../firebase';
+import { signInWithPopup, User } from 'firebase/auth';
 
 interface OnboardingProps {
+  currentUser: User | null;
   onComplete: (config: {
     productName: string;
     productDescription: string;
@@ -47,7 +50,7 @@ const ROLES = [
   },
 ];
 
-export function Onboarding({ onComplete }: OnboardingProps) {
+export function Onboarding({ currentUser, onComplete }: OnboardingProps) {
   const [step, setStep] = useState(1);
   const [authProvider, setAuthProvider] = useState<'slack' | 'google' | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -58,13 +61,31 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [productDescription, setProductDescription] = useState('An omnichannel workspace automating product lifecycle, multi-region syncing, and GDPR compliance checks.');
   const [isPreparing, setIsPreparing] = useState(false);
 
-  const startAuthentication = (provider: 'slack' | 'google') => {
+  // Auto-advance if already logged in via Firebase Google Auth
+  useEffect(() => {
+    if (currentUser && step === 1) {
+      setStep(2);
+    }
+  }, [currentUser, step]);
+
+  const startAuthentication = async (provider: 'slack' | 'google') => {
     setIsAuthenticating(true);
     setAuthProvider(provider);
-    setTimeout(() => {
-      setIsAuthenticating(false);
-      setStep(2);
-    }, 1500);
+    if (provider === 'google') {
+      try {
+        await signInWithPopup(auth, googleProvider);
+        setStep(2);
+      } catch (err) {
+        console.error("Firebase Authentication failed:", err);
+      } finally {
+        setIsAuthenticating(false);
+      }
+    } else {
+      setTimeout(() => {
+        setIsAuthenticating(false);
+        setStep(2);
+      }, 1500);
+    }
   };
 
   const handleConnectJira = () => {
