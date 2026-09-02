@@ -4,6 +4,10 @@
 
 `TypeScript` · `React` · `Vite` · `Firebase` · `Gemini`
 
+![PolyVerses access portal](docs/screenshot.png)
+
+*Entry portal. The orchestration console, agent network diagram, and observability dashboard sit behind SSO.*
+
 ---
 
 ## What it is
