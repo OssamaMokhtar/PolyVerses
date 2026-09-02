@@ -4,11 +4,22 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    # Majors are opt-in. Dependabot opened breaking bumps on day one
+    # (vite 6 -> 8, typescript 5 -> 7, plugin-react 5 -> 6) which CI correctly
+    # rejected. Security value lives in patch/minor; majors are reviewed by hand.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
