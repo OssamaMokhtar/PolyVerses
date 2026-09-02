@@ -1,5 +1,5 @@
 rules_version = '2';
-service cloudfire.firestore {
+service cloud.firestore {
   match /databases/{database}/documents {
 
     // 1. Global Safety Net - Default Deny Catch-All
