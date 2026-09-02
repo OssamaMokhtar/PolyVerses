@@ -1,20 +1,47 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# PolyVerses — Agentic Product Management Workbench
 
-# Run and deploy your AI Studio app
+> A multi-agent workbench for product leaders: orchestrate specialist AI agents, watch them work, and inspect what they actually did.
 
-This contains everything you need to run your app locally.
+`TypeScript` · `React` · `Vite` · `Firebase` · `Gemini`
 
-View your app in AI Studio: https://ai.studio/apps/619398f7-7b6f-4bfd-a018-f7c56956dd81
+---
 
-## Run Locally
+## What it is
 
-**Prerequisites:**  Node.js
+Most "AI for PM" tools are a chat box with a product-manager system prompt. PolyVerses is the opposite bet: a **network of specialist agents** with an orchestration layer, an observability dashboard, and a prompt console — so the interesting question isn't *what did the model say*, it's *which agent ran, on what input, and why*.
 
+## Core surfaces
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+| Component | What it does |
+|---|---|
+| **Orchestration Console** | Compose and run multi-agent workflows |
+| **Agent Network Diagram** | Visualise how agents hand off to each other |
+| **Observability Dashboard** | Trace runs, inspect intermediate output |
+| **Prompt Console** | Iterate on agent prompts against live state |
+| **Heatmaps** (D3 / Recharts) | Usage and performance density views |
+
+## Architecture
+
+The Gemini key is held **server-side** (`server.ts`) and the client calls the app's own endpoints — the key is never shipped to the browser.
+
+Firestore access is governed by [`firestore.rules`](firestore.rules): default-deny, ownership checks, email verification, per-field validation, and immutability constraints on sensitive fields. See [`security_spec.md`](security_spec.md) for the model.
+
+## Run locally
+
+**Prerequisites:** Node.js 18+
+
+```bash
+npm install
+cp .env.example .env.local     # add your GEMINI_API_KEY
+npm run dev
+```
+
+## Status
+
+Working prototype — ~7,000 lines. The agent roster and orchestration logic are real; this has not been run as a hosted multi-tenant service.
+
+**Known refactor:** `OrchestrationConsole.tsx` is ~2,000 lines and should be decomposed.
+
+## License
+
+MIT
