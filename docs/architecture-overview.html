@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PolySync — Architecture Overview</title>
+<style>
+  :root {
+    --bg: #0C0C0E; --surface: #121215; --border: #27272A;
+    --text: #E4E4E7; --muted: #71717A; --accent: #00A3FF; --accent-2: #60C5FF;
+    --green: #10B981; --amber: #F59E0B; --red: #EF4444;
+    --layer1: #00A3FF; --layer2: #60C5FF; --layer3: #F59E0B; --gov: #10B981; --fitness: #F59E0B;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; line-height: 1.6; overflow-x: hidden; }
+  body::before { content: ''; position: fixed; top: -200px; left: 50%; transform: translateX(-50%); width: 800px; height: 600px; background: radial-gradient(ellipse, rgba(245, 158, 11, 0.06) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 40px 24px; position: relative; z-index: 1; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 32px; backdrop-filter: blur(12px); }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 36px; height: 36px; background: linear-gradient(135deg, var(--fitness), #D4780A); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px; color: white; }
+  .brand h1 { font-size: 16px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+  .brand .sub { font-size: 11px; color: var(--muted); font-family: 'SF Mono', Menlo, monospace; }
+  .status-badge { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 20px; font-size: 12px; color: var(--green); font-weight: 600; }
+  .status-badge .dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  section { margin-bottom: 40px; }
+  .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: linear-gradient(to right, var(--border), transparent); }
+  .pipeline { display: grid; grid-template-columns: 1fr 60px 1fr 60px 1fr; gap: 10px; margin-bottom: 24px; align-items: start; }
+  .layer-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; position: relative; overflow: hidden; }
+  .layer-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .layer-card.l1::before { background: var(--layer1); }
+  .layer-card.l2::before { background: var(--layer2); }
+  .layer-card.l3::before { background: var(--layer3); }
+  .layer-card.gov::before { background: var(--gov); }
+  .layer-card.l1 { border-color: rgba(0, 163, 255, 0.2); }
+  .layer-card.l2 { border-color: rgba(96, 197, 255, 0.2); }
+  .layer-card.l3 { border-color: rgba(245, 158, 11, 0.2); }
+  .layer-card.gov { border-color: rgba(16, 185, 129, 0.2); border: 2px solid rgba(16, 185, 129, 0.3); }
+  .layer-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .layer-badge { padding: 2px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .l1 .layer-badge { background: rgba(0, 163, 255, 0.15); color: var(--layer1); }
+  .l2 .layer-badge { background: rgba(96, 197, 255, 0.15); color: var(--layer2); }
+  .l3 .layer-badge { background: rgba(245, 158, 11, 0.15); color: var(--layer3); }
+  .gov .layer-badge { background: rgba(16, 185, 129, 0.15); color: var(--gov); }
+  .layer-card h3 { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .layer-card .cost { font-size: 10px; color: var(--muted); font-family: 'SF Mono', Menlo, monospace; margin-bottom: 6px; }
+  .layer-card p { font-size: 11px; color: var(--text); margin-bottom: 4px; }
+  .layer-card .muted { color: var(--muted); font-size: 10px; }
+  .layer-card ul { list-style: none; padding: 0; margin: 0; }
+  .layer-card li { font-size: 10px; padding: 1px 0; color: var(--text); display: flex; gap: 3px; align-items: baseline; }
+  .layer-card li .tag { color: var(--muted); font-family: 'SF Mono', Menlo, monospace; font-size: 9px; min-width: 20px; }
+  .flow-arrow { display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--muted); padding: 0; height: 100%; min-height: 60px; }
+  .stack { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 16px; }
+  .stack-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .stack-item:last-child { border-bottom: none; }
+  .stack-item .icon { width: 22px; height: 22px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
+  .stack-item .icon.agent { background: rgba(245, 158, 11, 0.15); color: var(--fitness); }
+  .stack-item .icon.gov { background: rgba(16, 185, 129, 0.15); color: var(--gov); }
+  .stack-item .icon.cache { background: rgba(168, 130, 255, 0.15); color: #A882FF; }
+  .stack-item .icon.api { background: rgba(0, 163, 255, 0.15); color: var(--accent); }
+  .stack-item .content { flex: 1; }
+  .stack-item .file { font-size: 10px; font-family: 'SF Mono', Menlo, monospace; color: var(--accent-2); margin-bottom: 2px; }
+  .stack-item .desc { font-size: 11px; color: var(--text); }
+  .stack-item .muted { font-size: 10px; color: var(--muted); }
+  .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-bottom: 16px; }
+  .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+  .agent-card .agent-id { font-size: 10px; font-weight: 700; color: var(--fitness); font-family: 'SF Mono', Menlo, monospace; }
+  .agent-card .agent-name { font-size: 12px; font-weight: 600; margin: 3px 0 4px; }
+  .agent-card .agent-purpose { font-size: 10px; color: var(--text); margin-bottom: 4px; line-height: 1.3; }
+  .agent-card .agent-model { font-size: 9px; color: var(--muted); font-family: 'SF Mono', Menlo, monospace; }
+  .agent-card .agent-model .model-tag { padding: 1px 3px; border-radius: 2px; font-weight: 600; }
+  .model-flash { background: rgba(0, 163, 255, 0.15); color: var(--accent); }
+  .model-thinking { background: rgba(245, 158, 11, 0.15); color: var(--amber); }
+  .model-pro { background: rgba(16, 185, 129, 0.15); color: var(--green); }
+  .api-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px; }
+  .api-table th { text-align: left; padding: 6px 8px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+  .api-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .api-table tr:last-child td { border-bottom: none; }
+  .api-table .method { font-family: 'SF Mono', Menlo, monospace; font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 2px; display: inline-block; }
+  .method.post { background: rgba(0, 163, 255, 0.15); color: var(--accent); }
+  .method.get { background: rgba(16, 185, 129, 0.15); color: var(--green); }
+  .api-table .path { font-family: 'SF Mono', Menlo, monospace; color: var(--text); font-size: 10px; }
+  .api-table .desc { color: var(--text); font-size: 10px; }
+  .api-table .tokens { font-family: 'SF Mono', Menlo, monospace; font-size: 9px; color: var(--muted); }
+  .budget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .budget-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  .budget-card .name { font-size: 11px; font-weight: 600; margin-bottom: 2px; }
+  .budget-card .value { font-size: 16px; font-weight: 700; font-family: 'SF Mono', Menlo, monospace; color: var(--accent-2); }
+  .budget-card .value .unit { font-size: 10px; color: var(--muted); font-weight: 400; }
+  .budget-card .limit { font-size: 9px; color: var(--muted); margin-top: 2px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } .pipeline { grid-template-columns: 1fr; } .flow-arrow { transform: rotate(90deg); } .container { padding: 20px 16px; } }
+  .status-done { display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 7px; font-size: 9px; color: var(--green); font-weight: 600; }
+  .status-todo { display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px; background: rgba(113, 113, 122, 0.1); border: 1px solid rgba(113, 113, 122, 0.3); border-radius: 7px; font-size: 9px; color: var(--muted); font-weight: 600; }
+  .todo-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 5px; }
+  .todo-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; }
+  .todo-list li.done { border-color: rgba(16, 185, 129, 0.2); }
+  .todo-list li.todo { border-color: rgba(113, 113, 122, 0.2); }
+  footer { margin-top: 32px; padding: 14px 24px; border-top: 1px solid var(--border); text-align: center; font-size: 10px; color: var(--muted); }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="brand">
+      <div class="logo">P</div>
+      <div>
+        <h1>PolySync</h1>
+        <div class="sub">AI Fitness Coach · Architecture v1.0 · Governance Layer</div>
+      </div>
+    </div>
+    <div class="status-badge"><span class="dot"></span>12-Agent Mesh + Governance Layer Design</div>
+  </header>
+
+  <section>
+    <div class="section-title">Architecture — Three Layers</div>
+    <div class="pipeline">
+      <div class="layer-card l1">
+        <div class="layer-header"><span class="layer-badge">Layer 1</span><h3>Fitness Agent Mesh</h3></div>
+        <div class="cost">F00–F11 · Gemini 3.5 Flash / Flash Thinking / Pro</div>
+        <ul>
+          <li><span class="tag">F00</span> Orchestrator Router</li>
+          <li><span class="tag">F01</span> Profile Agent</li>
+          <li><span class="tag">F02</span> Workout Generator</li>
+          <li><span class="tag">F03</span> Exercise Library</li>
+          <li><span class="tag">F04</span> Recovery Analyst</li>
+          <li><span class="tag">F05</span> Plan Adaptor</li>
+          <li><span class="tag">F06</span> Coaching Chat</li>
+          <li><span class="tag">F07</span> Form Coach</li>
+          <li><span class="tag">F08</span> Nutrition Advisor</li>
+          <li><span class="tag">F09</span> Motivation Coach</li>
+          <li><span class="tag">F10</span> Data Ingest (ETL)</li>
+          <li><span class="tag">F11</span> Compliance Gate</li>
+        </ul>
+        <p class="muted">16 API endpoints · Per-user Firestore · Server-side Gemini · Sandbox fallback</p>
+      </div>
+      <div class="flow-arrow">▸</div>
+      <div class="layer-card l2">
+        <div class="layer-header"><span class="layer-badge">Layer 2</span><h3>Governance Wrappers</h3></div>
+        <div class="cost">Token tracking · Budget checks · Circuit breakers · Cache</div>
+        <p>Wraps every Gemini call in F00–F11:</p>
+        <ul>
+          <li><span class="tag">recordTokenUsage</span> Before/after each call</li>
+          <li><span class="tag">checkSessionBudget</span> 200K/session → 429</li>
+          <li><span class="tag">checkCircuitBreaker</span> Per-tier failure tracking</li>
+          <li><span class="tag">getCachedContext</span> 24h TTL · 100 entries</li>
+        </ul>
+        <p class="muted"><strong>New code in server.ts</strong> — wraps existing 1224 lines, adds ~200 lines</p>
+      </div>
+      <div class="flow-arrow">▸</div>
+      <div class="layer-card l3">
+        <div class="layer-header"><span class="layer-badge">Layer 3</span><h3>Knowledge + Distillation</h3></div>
+        <div class="cost">~233K tokens/week per 100 users · Batched · Scheduled</div>
+        <p>Indexes Firestore data into a searchable brain:</p>
+        <ul>
+          <li><span class="tag">FitnessNote</span> Indexes workouts, check-ins, chats, recovery, wearables</li>
+          <li><span class="tag">FitnessClassifier</span> Type, entities, date, decision_made, open_questions</li>
+          <li><span class="tag">Distillation</span> Weekly gist → Monthly summary → Quarterly principle</li>
+          <li><span class="tag">GraphEdges</span> Links workouts → check-ins → recovery → plans</li>
+        </ul>
+        <p class="muted"><strong>New files:</strong> knowledge-types.ts · distillation-scheduler.ts · context-cache.ts</p>
+      </div>
+    </div>
+    <div class="layer-card gov" style="margin-top: 8px;">
+      <div class="layer-header"><span class="layer-badge">Cross-Cutting</span><h3>Observability + Human Gate</h3></div>
+      <p><strong>/api/budget</strong> — session tokens, agent breakdown (F00–F11), circuit breaker state, cache stats, distillation stats. <strong>/api/fitness/gates/:id/decide</strong> — human gate for medical queries (F11) and significant plan changes (F05). <strong>/api/fitness/think</strong> — recall from indexed fitness data without burning a capable model. <strong>/api/fitness/specialist</strong> — invoke F00–F11 with governance wrapper + assembled context.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">12-Agent Mesh — Models &amp; Token Profile</div>
+    <div class="agents-grid">
+      <div class="agent-card"><div class="agent-id">F00</div><div class="agent-name">Orchestrator Router</div><div class="agent-purpose">Routes user requests to agents; orchestrates multi-agent chains (generate plan, compliance check, adapt)</div><div class="agent-model"><span class="model-tag model-flash">Flash</span> · ~1K/call</div></div>
+      <div class="agent-card"><div class="agent-id">F01</div><div class="agent-name">Profile Agent</div><div class="agent-purpose">Validates + structures fitness profile; detects contradictions (advanced + no equipment)</div><div class="agent-model"><span class="model-tag model-flash">Flash</span> · ~2K/call</div></div>
+      <div class="agent-card"><div class="agent-id">F02</div><div class="agent-name">Workout Generator</div><div class="agent-purpose">Generates weekly plan from profile + exercise library; progressive overload; distributes across days</div><div class="agent-model"><span class="model-tag model-thinking">Flash Thinking</span> · ~8–15K</div></div>
+      <div class="agent-card"><div class="agent-id">F03</div><div class="agent-name">Exercise Library</div><div class="agent-purpose">Serves exercise metadata; handles substitution queries (same muscle, matching equipment)</div><div class="agent-model"><span class="model-tag model-flash">Flash</span> · ~1K/call</div></div>
+      <div class="agent-card"><div class="agent-id">F04</div><div class="agent-name">Recovery Analyst</div><div class="agent-purpose">Computes 0–100 recovery score from sleep/HRV/RHR/workout frequency/energy; recommends train/reduce/rest</div><div class="agent-model"><span class="model-tag model-thinking">Flash Thinking</span> · ~2K/call</div></div>
+      <div class="agent-card"><div class="agent-id">F05</div><div class="agent-name">Plan Adaptor</div><div class="agent-purpose">Adjusts next week based on completed/skipped workouts, recovery scores, feedback; progressive overload</div><div class="agent-model"><span class="model-tag model-thinking">Flash Thinking</span> · ~4–8K</div></div>
+      <div class="agent-card"><div class="agent-id">F06</div><div class="agent-name">Coaching Chat</div><div class="agent-purpose">Conversational coach; answers with context from profile, workouts, plan, recovery, wearables</div><div class="agent-model"><span class="model-tag model-thinking">Flash Thinking</span> · ~4–12K</div></div>
+      <div class="agent-card"><div class="agent-id">F07</div><div class="agent-name">Form Coach</div><div class="agent-purpose">Form cues + common mistakes per exercise; interprets user's movement feel description</div><div class="agent-model"><span class="model-tag model-flash">Flash</span> · ~1–2K</div></div>
+      <div class="agent-card"><div class="agent-id">F08</div><div class="agent-name">Nutrition Advisor</div><div class="agent-purpose">TDEE estimate + macro targets; meal timing; practical food suggestions; medical disclaimer</div><div class="agent-model"><span class="model-tag model-flash">Flash</span> · ~2–4K</div></div>
+      <div class="agent-card"><div class="agent-id">F09</div><div class="agent-name">Motivation Coach</div><div class="agent-purpose">Analyzes check-in sentiment; detects dropout risk; generates motivational messages; adjusts tone</div><div class="agent-model"><span class="model-tag model-flash">Flash</span> · ~1–2K</div></div>
+      <div class="agent-card"><div class="agent-id">F10</div><div class="agent-name">Data Ingest</div><div class="agent-purpose">Normalizes wearable data (HealthKit/GoogleFit/Strava/Garmin/WHOOP/Oura) into common schema — ETL, no LLM</div><div class="agent-model"><span class="model-tag" style="background:var(--surface);color:var(--muted)">No LLM</span> · 0 tokens</div></div>
+      <div class="agent-card"><div class="agent-id">F11</div><div class="agent-name">Compliance Gate</div><div class="agent-purpose">Safety gate; checks exercises against injuries; enforces disclaimers; blocks medical advice; health consent gate</div><div class="agent-model"><span class="model-tag model-thinking">Flash Thinking</span> · ~2K</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">API Endpoints</div>
+    <table class="api-table">
+      <thead><tr><th style="width:60px">Method</th><th style="width:200px">Endpoint</th><th>Purpose</th><th style="width:70px">Tokens</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/profile</td><td class="desc">Save/update fitness profile (F01 validates)</td><td class="tokens">~2K</td></tr>
+        <tr><td><span class="method get">GET</span></td><td class="path">/api/fitness/profile</td><td class="desc">Get current profile</td><td class="tokens">0</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/generate-plan</td><td class="desc">Generate weekly workout plan (F02)</td><td class="tokens">8–15K</td></tr>
+        <tr><td><span class="method get">GET</span></td><td class="path">/api/fitness/plan</td><td class="desc">Get current plan</td><td class="tokens">0</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/log-workout</td><td class="desc">Log workout + trigger adaptation (F05)</td><td class="tokens">0 + 4–8K</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/adapt-plan</td><td class="desc">Manual re-adaptation trigger</td><td class="tokens">4–8K</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/chat</td><td class="desc">Coaching chat (F06) — full context from profile/workouts/plan/recovery</td><td class="tokens">4–12K</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/recovery</td><td class="desc">Compute recovery score (F04) — sleep/HRV/RHR/frequency/energy</td><td class="tokens">~2K</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/nutrition</td><td class="desc">Nutrition guidance (F08) — TDEE + macros + meal ideas</td><td class="tokens">2–4K</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/form-cue</td><td class="desc">Form cues for exercise (F07)</td><td class="tokens">1–2K</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/substitute</td><td class="desc">Find exercise substitute (F03) — lookup only</td><td class="tokens">0</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/checkin</td><td class="desc">Record check-in + trigger motivation (F09)</td><td class="tokens">0 + 1–2K</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/webhook/healthkit</td><td class="desc">Apple HealthKit callback (F10 — ETL)</td><td class="tokens">0</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/webhook/googlefit</td><td class="desc">Google Fit callback (F10 — ETL)</td><td class="tokens">0</td></tr>
+        <tr><td><span class="method get">GET</span></td><td class="path">/api/fitness/progress</td><td class="desc">Aggregated progress data</td><td class="tokens">0</td></tr>
+        <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/consent</td><td class="desc">Set health data consent (F11 gate)</td><td class="tokens">0</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <div class="two-col">
+    <section>
+      <div class="section-title">Token Budgets</div>
+      <div class="budget-grid">
+        <div class="budget-card"><div class="name">Session Budget</div><div class="value">200K <span class="unit">tokens</span></div><div class="limit">Per session · 429 when exceeded</div></div>
+        <div class="budget-card"><div class="name">Weekly Distillation</div><div class="value">500K <span class="unit">tokens/week</span></div><div class="limit">Per workspace · Stop at current level</div></div>
+        <div class="budget-card"><div class="name">Context Assembly</div><div class="value">4,096 <span class="unit">output tokens</span></div><div class="limit">Per assembly call · maxOutputTokens</div></div>
+        <div class="budget-card"><div class="name">Specialist Invocations</div><div class="value">10 <span class="unit">per session</span></div><div class="limit">429 when exceeded</div></div>
+        <div class="budget-card"><div class="name">Est. per User/Week</div><div class="value">~215K <span class="unit">tokens</span></div><div class="limit">Moderately active user (chat + plan + recovery)</div></div>
+        <div class="budget-card"><div class="name">Distillation (100 users)</div><div class="value">~233K <span class="unit">tokens/week</span></div><div class="limit">L2: 200K + L3: 30K + L4: 3K</div></div>
+      </div>
+    </section>
+    <section>
+      <div class="section-title">Governance Endpoints (New)</div>
+      <table class="api-table">
+        <thead><tr><th style="width:60px">Method</th><th style="width:180px">Endpoint</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method get">GET</span></td><td class="path">/api/budget</td><td class="desc">Session tokens, agent breakdown (F00–F11), circuit breakers, cache stats, distillation stats</td></tr>
+          <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/capture-note</td><td class="desc">Index Firestore data into FitnessNote with classifier — wraps existing collections</td></tr>
+          <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/think</td><td class="desc">Intent router + retrieval + assembly — recall from indexed fitness data, no capable model</td></tr>
+          <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/specialist</td><td class="desc">Invoke F00–F11 with governance wrapper — budget check + circuit breaker + token tracking</td></tr>
+          <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/gates/:id/decide</td><td class="desc">Human gate for medical queries (F11) + significant plan changes (F05)</td></tr>
+          <tr><td><span class="method post">POST</span></td><td class="path">/api/fitness/distill/batch</td><td class="desc">Manual distillation trigger — Level 2/3/4 for specific users or all users</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <section>
+    <div class="section-title">Knowledge Layer — Data Model</div>
+    <div class="stack">
+      <div class="stack-item">
+        <div class="icon api">📝</div>
+        <div class="content"><div class="file">FitnessNote — atomic unit of the fitness brain</div><div class="desc"><strong>id</strong> string (UUID) · <strong>uid</strong> string · <strong>source_collection</strong> 'workouts' | 'checkIns' | 'chatSessions' | 'recovery' | 'wearableData' | 'plans' · <strong>source_type</strong> 'workout_log' | 'check_in' | 'chat_message' | 'recovery_assessment' | 'wearable_snapshot' | 'weekly_plan' · <strong>verbatim_text</strong> string · <strong>classifier</strong> FitnessClassifier · <strong>para_bucket</strong> Project | Area | Resource | Archive · <strong>project_id</strong> string? (e.g. "goal_build_muscle") · <strong>distillation_level</strong> 1|2|3|4 · <strong>gist</strong> string? · <strong>summary</strong> string? · <strong>principle</strong> string? · <strong>engagement_score</strong> number · <strong>graph_edges</strong> GraphEdge[]?</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="icon api">🏷️</div>
+        <div class="content"><div class="file">FitnessClassifier — classifies each indexed note</div><div class="desc"><strong>type</strong> 'workout' | 'check_in' | 'chat' | 'recovery' | 'nutrition' | 'form' | 'motivation' | 'plan' · <strong>entities</strong> string[] (exercises, body parts, supplements, goals) · <strong>date</strong> string? · <strong>decision_made</strong> boolean (plan change, rest recommendation) · <strong>open_questions</strong> string[] (unanswered user questions)</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="icon cache">🔗</div>
+        <div class="content"><div class="file">GraphEdge — links related fitness data</div><div class="desc"><strong>target_type</strong> 'note' | 'workout' | 'exercise' | 'goal' | 'check_in' | 'recovery' · <strong>target_id</strong> string · <strong>relation</strong> 'PART_OF_WEEK' | 'FOLLOWS' | 'CITES' | 'RELATED_TO' | 'RECOVERED_FROM' | 'PAIN_REPORTED_FOR' · <strong>direction</strong> 'outgoing' | 'incoming'</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="icon gov">📊</div>
+        <div class="content"><div class="file">BudgetSnapshot — /api/budget response</div><div class="desc"><strong>session_tokens_used</strong> number · <strong>session_budget</strong> 200000 · <strong>session_remaining</strong> number · <strong>weekly_tokens_used</strong> number · <strong>weekly_tokens_budget</strong> 1500000 · <strong>agent_breakdown</strong> { F00: n, F01: n, ... F11: n } · <strong>circuit_breakers</strong> { tier, status, reason? }[] · <strong>cache_stats</strong> { size, max: 100, hit_rate_estimate } · <strong>distillation_stats</strong> { level2_run_count, level3_run_count, level4_run_count, tokens_distilled_this_week }</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Implementation Status</div>
+    <div>
+      <h3 style="font-size:11px;font-weight:600;margin-bottom:6px;color:var(--green)">Existing Fitness Codebase (origin/main) <span class="status-done">✓</span></h3>
+      <ul class="todo-list">
+        <li class="done"><span class="status-done">✓</span> 12-agent mesh (F00–F11) — server.ts 1224 lines</li>
+        <li class="done"><span class="status-done">✓</span> 16 fitness API endpoints — POST /api/fitness/* + GET /api/fitness/*</li>
+        <li class="done"><span class="status-done">✓</span> Firebase Auth + Firestore per-user storage</li>
+        <li class="done"><span class="status-done">✓</span> Gemini 3.5 Flash / Flash Thinking routing per agent</li>
+        <li class="done"><span class="status-done">✓</span> Sandbox fallback when GEMINI_API_KEY missing</li>
+        <li class="done"><span class="status-done">✓</span> ExerciseLibrary.ts — bundled exercise data</li>
+        <li class="done"><span class="status-done">✓</span> D3 agent network + heatmap · Recharts progress charts</li>
+        <li class="done"><span class="status-done">✓</span> Observability dashboard · Prompt console · FitnessOnboarding</li>
+        <li class="done"><span class="status-done">✓</span> F11 Compliance Gate — safety checks + disclaimers</li>
+        <li class="done"><span class="status-done">✓</span> Architecture doc (ARCHITECTURE.md — 328 lines)</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="font-size:11px;font-weight:600;margin-bottom:6px;color:var(--fitness)">Governance Layer (This Document) <span class="status-todo">TODO</span></h3>
+      <ul class="todo-list">
+        <li class="todo"><span class="status-todo">○</span> Phase 1: Token tracking + session budget (wrap every /api/fitness/* endpoint)</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 1: GET /api/budget endpoint + agent breakdown</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 1: x-session-id header handling (client generates on mount)</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 2: Circuit breakers (small/medium/capable) per tier</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 2: Tier downgrade logic (capable→medium→small)</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 2: Failure counting (3 failures/5min → open breaker)</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 3: Context cache (24h TTL, 100 entries, LRU)</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 3: Cache F06 chat responses + F04 recovery + F02 plans</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 4: Knowledge layer — FitnessNote + FitnessClassifier + GraphEdge</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 4: POST /api/fitness/capture-note — indexes Firestore data</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 4: Wire capture-note into log-workout, checkin, chat, recovery, plan</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 4: Distillation scheduler — weekly/monthly/quarterly cron</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 5: Human gate for medical queries + plan changes</li>
+        <li class="todo"><span class="status-todo">○</span> Phase 5: Human override rate tracking (7-day window)</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Build Sequence — 5 Phases</div>
+    <div class="stack">
+      <div class="stack-item"><div class="icon gov">1</div><div class="content"><div class="file">Phase 1 — Token tracking + session budget</div><div class="desc">Add recordTokenUsage/checkSessionBudget/sessionBudgets Map to server.ts. Add token estimation to every Gemini call in F00–F11. Add checkSessionBudget before every call → 429 if exceeded. Add GET /api/budget. Add x-session-id header handling.</div></div></div>
+      <div class="stack-item"><div class="icon gov">2</div><div class="content"><div class="file">Phase 2 — Circuit breakers + observability</div><div class="desc">Add circuitBreakers object + checkCircuitBreaker/openCircuitBreaker. Wire before every Gemini call → 429 if open. Add failure counting (3 failures/5min → open). Extend /api/budget with breaker status. Add tier downgrade (capable→medium→small).</div></div></div>
+      <div class="stack-item"><div class="icon cache">3</div><div class="content"><div class="file">Phase 3 — Context cache</div><div class="desc">Add src/context-cache.ts (LRU, 24h TTL, 100 entries). Wire into F06 (cache chat responses), F04 (cache recovery if wearable unchanged), F02 (cache plan if profile unchanged). Extend /api/budget with cache stats.</div></div></div>
+      <div class="stack-item"><div class="icon api">4</div><div class="content"><div class="file">Phase 4 — Knowledge layer + distillation</div><div class="desc">Add src/knowledge-types.ts (FitnessNote, FitnessClassifier, GraphEdge). Add POST /api/fitness/capture-note. Wire into every write endpoint. Add src/distillation-scheduler.ts (cron). Add POST /api/fitness/distill/batch. Add Level 2/3/4 storage collections.</div></div></div>
+      <div class="stack-item"><div class="icon gov">5</div><div class="content"><div class="file">Phase 5 — Human gate for health decisions</div><div class="desc">Extend F11 to trigger human gate for medical questions + significant plan changes. Add POST /api/fitness/gates/:id/decide. Wire human gate UI into coaching chat. Track human override rate (7-day window).</div></div></div>
+    </div>
+  </section>
+
+  <footer>
+    PolySync AI Fitness Coach · 12-Agent Mesh (F00–F11) + Governance Layer · 16 API Endpoints · Server-side Gemini 3.5 · Firebase Auth + Firestore
+  </footer>
+</div>
+</body>
+</html>
