@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PROJECTOS — PolyVerses · PolySync · Product Leadership OS</title>
+<meta name="description" content="Living Project Intelligence Portal. PolyVerses v3.1 AI PM Workbench · PolySync v2.0 AI Fitness Coach (12-agent mesh F00–F11, 17 endpoints) · Product Leadership OS (183 skills + 6 gates). Single source of truth from idea through global scale.">
+<style>
+/* ── Core ── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0A0A0F;--surface:#12121A;--surface2:#1A1A24;--border:#2A2A3A;
+  --text:#E4E4EC;--muted:#8888A0;--accent:#4F8CFF;--accent2:#6C5CE7;
+  --green:#00D68F;--amber:#FFAA33;--red:#FF4757;--purple:#A855F7;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --mono:'SF Mono',Menlo,Consolas,monospace;
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6;font-size:14px}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:0.85em;background:var(--surface);padding:1px 4px;border-radius:3px}
+pre{font-family:var(--mono);font-size:0.82em;background:var(--surface);padding:12px;border-radius:6px;overflow-x:auto;border:1px solid var(--border)}
+pre code{background:none}
+h1{font-size:clamp(1.4rem,3vw,2rem);padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:14px}
+h2{font-size:clamp(1.1rem,2.5vw,1.4rem);padding-bottom:6px;border-bottom:1px solid var(--border);margin:24px 0 10px}
+h3{font-size:1rem;margin:14px 0 6px;color:var(--accent)}
+h4{font-size:0.85rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin:10px 0 4px}
+p{margin-bottom:7px}
+ul,ol{margin-left:20px;margin-bottom:7px}
+li{margin-bottom:3px}
+.section{padding:4px 0}
+.tag{display:inline-block;padding:1px 6px;border-radius:10px;font-size:11px;font-weight:600;margin-right:3px}
+.t-green{background:rgba(0,214,143,0.15);color:var(--green)}
+.t-amber{background:rgba(255,170,51,0.15);color:var(--amber)}
+.t-red{background:rgba(255,71,87,0.15);color:var(--red)}
+.t-blue{background:rgba(79,140,255,0.15);color:var(--accent)}
+.t-purple{background:rgba(168,85,247,0.15);color:var(--purple)}
+.t-gray{background:rgba(113,113,122,0.15);color:var(--muted)}
+.callout{padding:12px 14px;border-radius:6px;margin:12px 0;border-left:3px solid}
+.c-info{background:rgba(79,140,255,0.06);border-color:var(--accent)}
+.c-success{background:rgba(0,214,143,0.06);border-color:var(--green)}
+.c-warning{background:rgba(255,170,51,0.06);border-color:var(--amber)}
+.c-danger{background:rgba(255,71,87,0.06);border-color:var(--red)}
+.c-vision{background:rgba(124,58,237,0.06);border-color:var(--accent2)}
+.callout strong{display:block;margin-bottom:3px}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th{background:var(--surface);color:var(--muted);text-align:left;padding:6px 8px;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;border-bottom:1px solid var(--border)}
+td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+tr:hover td{background:var(--surface)}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin:12px 0}
+.kpi{padding:10px 12px;border-radius:6px;background:var(--surface);border:1px solid var(--border)}
+.kpi .v{font-size:1.3rem;font-weight:700;color:var(--accent);font-family:var(--mono)}
+.kpi .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;margin-top:2px}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px;margin:6px 0}
+.metric-card .mv{font-size:1.5rem;font-weight:700;color:var(--accent);font-family:var(--mono)}
+.metric-card .ml{font-size:12px;color:var(--text);margin-top:3px}
+.metric-card .ms{font-size:11px;color:var(--muted);margin-top:5px}
+.gantt{display:grid;grid-template-columns:120px 1fr;gap:8px 12px;align-items:center;margin:8px 0;font-size:12px}
+.gantt-bar{height:10px;border-radius:3px;display:inline-block}
+.gantt-bar.p1{background:var(--accent)}
+.gantt-bar.p2{background:var(--green)}
+.gantt-bar.p3{background:var(--amber)}
+.gantt-bar.p4{background:var(--accent2)}
+.gantt-bar.p5{background:var(--red)}
+.mermaid{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:var(--mono);font-size:0.78em;white-space:pre-wrap;line-height:1.5;margin:10px 0}
+.mermaid .c{color:var(--muted);font-style:italic}
+.mermaid .a{color:var(--accent)}
+.mermaid .ag{color:var(--purple)}
+.mermaid .db{color:var(--amber)}
+.mermaid .eq{color:var(--green)}
+.backdrop-blur{background:transparent;backdrop-filter:blur(8px)}
+.header{position:sticky;top:0;z-index:40;background:rgba(10,10,15,0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.hbrand{font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.hbrand .logo{width:22px;height:22px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:900}
+.htab{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:2px;gap:1px}
+.htab button{padding:4px 10px;font-size:11px;color:var(--muted);border:none;background:none;cursor:pointer;border-radius:3px}
+.htab button:hover{color:var(--text)}
+.htab button.active{color:var(--accent);background:rgba(79,140,255,0.1)}
+.search{flex:1;max-width:280px;display:flex}
+.search input{flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;outline:none}
+.search input:focus{border-color:var(--accent)}
+.hbtn{padding:4px 8px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:4px;cursor:pointer;font-size:11px}
+.hbtn:hover{border-color:var(--accent)}
+.theme{padding:4px 6px;border-radius:4px;cursor:pointer;font-size:13px;background:none;border:none;color:var(--text)}
+@media(max-width:640px){.htab{display:none}.search{max-width:none}}
+.container{max-width:1100px;margin:0 auto;padding:12px 16px}
+.sidenav{position:fixed;top:60px;left:0;bottom:0;width:230px;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:10px;transform:translateX(-100%);transition:transform 0.25s;z-index:30Z-index:30}
+.sidenav.open{transform:translateX(0)}
+.sidenav h3{font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin:8px 0 4px;padding-left:8px}
+.sidenav a{display:block;padding:2px 8px;font-size:12px;color:var(--muted);border-radius:3px}
+.sidenav a:hover{color:var(--text);background:var(--surface2)}
+.sidenav a.act{color:var(--accent)}
+.section-nav{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
+.section-nav button{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px}
+.section-nav button:hover{border-color:var(--accent);color:var(--accent)}
+.section-nav button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.scroll-top{position:fixed;bottom:15px;right:15px;width:32px;height:32px;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text);cursor:pointer;display:none;align-items:center;justify-content:center;font-size:14px;z-index:20;box-shadow:0 2px 6px rgba(0,0,0,0.3)}
+.scroll-top.show{display:flex}
+.roadmap-phase{border-left:3px solid;padding:10px 12px;margin:6px 0;border-radius:0 6px 6px 0}
+.rp1{border-color:var(--accent);background:rgba(79,140,255,0.04)}
+.rp2{border-color:var(--green);background:rgba(0,214,143,0.04)}
+.rp3{border-color:var(--amber);background:rgba(255,170,51,0.04)}
+.rp4{border-color:var(--accent2);background:rgba(124,58,237,0.04)}
+.rp5{border-color:var(--red);background:rgba(255,71,87,0.04)}
+.adr{font-family:var(--mono);font-size:0.85em;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:10px 12px;margin:8px 0}
+.adr .id{color:var(--accent);font-weight:700}
+.adr .fld{color:var(--muted);font-size:0.75em;text-transform:uppercase;letter-spacing:0.04em;margin-top:6px}
+.empty{border:1px dashed var(--border);border-radius:6px;padding:14px;text-align:center;color:var(--muted);margin:10px 0}
+.empty .ei{font-size:1.5rem;margin-bottom:4px}
+.nowcard{background:linear-gradient(135deg,rgba(79,140,255,0.08),rgba(124,58,237,0.08));border:1px solid var(--accent);border-radius:8px;padding:14px;margin:12px 0}
+.nowcard h3{margin-top:0;color:var(--accent)}
+.verdict{background:rgba(0,214,143,0.06);border:1px solid var(--green);border-radius:6px;padding:12px 14px;margin:12px 0}
+.verdict strong{color:var(--green);font-size:1rem;display:block;margin-bottom:4px}
+.footnote{font-size:11px;color:var(--muted);margin-top:10px;border-top:1px solid var(--border);padding-top:6px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin:10px 0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;margin:10px 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px}
+.card h4{margin-bottom:3px}
+.card .cs{font-size:11px;color:var(--muted);margin-bottom:6px}
+.card p{font-size:12px}
+.badge-d{background:rgba(0,214,143,0.15);color:var(--green);padding:1px 5px;border-radius:3px;font-size:10px;font-family:var(--mono);font-weight:600}
+.badge-p{background:rgba(255,170,51,0.15);color:var(--amber);padding:1px 5px;border-radius:3px;font-size:10px;font-family:var(--mono);font-weight:600}
+.badge-t{background:rgba(113,113,122,0.15);color:var(--muted);padding:1px 5px;border-radius:3px;font-size:10px;font-family:var(--mono);font-weight:600}
+.print-only{display:none}
+@media print{
+  .header,.scroll-top,.section-nav,.theme{display:none!important}
+  body{background:#fff;color:#000;font-size:11px}
+  .section{page-break-inside:avoid}
+  pre,border{border-color:#ccc!important}
+}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div style="display:flex;align-items:center;gap:8px">
+    <button class="hbtn" id="menu-btn">☰</button>
+    <div class="hbrand"><div class="logo">P</div>PROJECTOS <span style="font-weight:400;color:var(--muted);font-size:11px">v1.0</span></div>
+  </div>
+  <div class="htab" id="htabs">
+    <button class="active" data-tab="all">All</button>
+    <button data-tab="polyverses">PolyVerses</button>
+    <button data-tab="polysync">PolySync</button>
+    <button data-tab="plos">PLOS</button>
+  </div>
+  <div class="search"><input type="text" id="search" placeholder="Search sections, agents, endpoints..." autocomplete="off"></div>
+  <div style="display:flex;gap:6px;align-items:center">
+    <button class="hbtn" id="print-btn">🖨️</button>
+    <button class="theme" id="theme-btn">🌙</button>
+  </div>
+</header>
+
+<div class="sidenav" id="sidenav">
+<h3>Sections</h3>
+<div id="sidebar-sections"></div>
+</div>
+
+<main class="container" id="main">
+
+<!-- ====== SECTION 1: EXECUTIVE SUMMARY ====== -->
+<div class="section" data-section="1" data-system="all">
+<h1>1 · Executive Summary</h1>
+
+<div class="nowcard">
+<h3>🧠 One Platform. Three Layers. Infinite Expertise.</h3>
+<p><strong>PolyVerses</strong> (v3.1) — AI-native PM workbench orchestration layer: 23-agent network, orchestrator router, human-in-the-loop gates (15-min undo), RBAC (CPO/Group PM/PM/Product Ops), observability (token cost counters + override rate + latency), Neo4j+Pinecone context layer, MoE conflict resolver, circuit breakers with cost-based model routing (GPT-4o for high-stakes, Llama 3 8B for low-stakes).</p>
+<p><strong>PolySync</strong> (v2.0) — First domain deployment: server-side Express + Vite + Gemini 3.5 + Firebase app delivering adaptive AI fitness coaching through a 12-agent specialist mesh (F00–F11) and 17 API endpoints. Built on 613 lines of TypeScript types, 1224 lines of server, 643 lines of React client, 733 lines of onboarding, 101-exercise library.</p>
+<p><strong>Product Leadership OS (PLOS)</strong> — Specialist thought-partner skill library: 183 ranked agent skills + 6 decision gates (Go/No-Go, Build vs Buy, Phase Gate, Pivot, Escalate, Sunset), delivered as Obsidian vault with HTML explorer. The "brain" PolyVerses orchestrates and PolySync consumes.</p>
+</div>
+
+<h3>1.1 Vision</h3>
+<div class="callout c-vision">
+  <strong>Every product leader and every athlete has access to expert-level, adaptive, multi-dimensional AI coaching — governed by token budgets, protected by human gates, powered by a specialist agent mesh, and continuously distilled into a searchable second brain.</strong>
+</div>
+
+<h3>1.2 Product Vision Board</h3>
+<table>
+<tr><th style="width:22%">Dimension</th><th>Definition</th></tr>
+<tr><td><strong>PolyVerses</strong></td><td>AI-Native Product Management Workbench — orchestrator-driven multi-agent platform for product discovery, architecture, compliance, roadmap, financial modeling, and operational excellence. Reference architecture for the second-brain / thought-partner system.</td></tr>
+<tr><td><strong>PolySync</strong></td><td>AI Fitness Coach — first domain proving the pattern. 12-agent mesh (F00–F11), 17 endpoints, Gemini 3.5 routing, Firebase per-user storage, wearable data normalization (6 sources), recovery-driven adaptive plans, form coaching, nutrition guidance, motivational coaching, governance layer designed to wrap the mesh.</td></tr>
+<tr><td><strong>PLOS</strong></td><td>Product Leadership OS — 183 ranked agent skills + 6 decision gates, delivered as Obsidian vault with HTML explorer. The specialist knowledge layer that feeds the orchestration layer.</td></tr>
+<tr><td><strong>Unified System</strong></td><td>PolyVerses orchestrates PLOS skills → PolySync is the first domain application → together they form a Living Project Intelligence Portal: single source of truth from idea through global scale.</td></tr>
+</table>
+
+<h3>1.3 Strategic Objectives</h3>
+<table>
+<tr><th>#</th><th>Objective</th><th>Horizon</th><th>Success Criteria</th></tr>
+<tr><td>SO1</td><td>Ship PolySync v2.0 production-ready — all 12 agents + 17 endpoints + governance layer design documented</td><td>Q4 2026</td><td>Live on Vercel/self-hosted; 50 beta users; 0 critical bugs; all endpoints returning correct schemas</td></tr>
+<tr><td>SO2</td><td>Close top 3 governance gaps — token budget observability, circuit breakers, context cache (Phase 1–3)</td><td>Q1 2027</td><td>/api/budget live; breakers enforcing 3-tier failure limits; cache hitting >40% of F06/F04/F02 calls</td></tr>
+<tr><td>SO3</td><td>Distillation pipeline + FitnessNote knowledge layer (Phase 4) — weekly/monthly/quarterly</td><td>Q2 2027</td><td>Distillation cron for 100+ users; FitnessNote count >10,000; /api/ask returning relevant cross-user context</td></tr>
+<tr><td>SO4</td><td>Human gate for plan changes (Phase 5) — F05 adaptation requires user approval for material changes</td><td>Q3 2027</td><td>Gate UX live; override rate tracked; approval flow for >20% volume change or provocative substitution</td></tr>
+<tr><td>SO5</td><td>Publish consumable API + agent SDK — third-party apps/coaches invoke PolySync agents</td><td>Q2 2027</td><td>Public API docs; 3 external integrations (coaching dashboard, Slack bot, wearable aggregator)</td></tr>
+<tr><td>SO6</td><td>Mobile (React Native/PWA) + push notifications (FCM) + Stripe payments</td><td>Q4 2027</td><td>Mobile app in App Stores; daily digest push live; subscription gating enforced on free/premium/elite</td></tr>
+<tr><td>SO7</td><td>Enterprise/B2B2C expansion — white-label for coaching businesses, gyms, corporate wellness</td><td>2028</td><td>3 enterprise contracts; white-label config working; multi-tenant architecture validated</td></tr>
+<tr><td>SO8</td><td>PLOS skills consumed on PolySync decisions — Option A: PLOS as PM co-pilot</td><td>Sprint 1 → ongoing</td><td>AI Safety-by-Architecture Reviewer + Human-in-the-Loop Product Architect skills evaluated on GAPS.md + architecture decisions</td></tr>
+<tr><td>SO9</td><td>PolySync as PLOS case study — Option B: real eval results from live fitness coaching data</td><td>After eval results exist</td><td>2 case studies: "How PolySync validated adaptive plan adoption" + "Recovery-driven coaching outcomes"</td></tr>
+<tr><td>SO10</td><td>Unified knowledge infrastructure — Option C: merge PLOS Obsidian vault with PolyVerses/PolySync PARA vaults</td><td>After real deployment cycle</td><td>Cross-linked PARA: Project (PolySync) / Area (Fitness Coaching) / Resource (PLOS skills) / Archive (deprecated)</td></tr>
+</table>
+
+<h3>1.4 North Star Metric</h3>
+<div class="kpi-grid">
+<div class="kpi"><div class="v">Coaching Adaptations / user / week</div><div class="l">North Star — meaningful AI-driven adaptations per user per week (plan changes, recovery adjustments, form cues, nutrition guidance, coaching responses, motivation interventions)</div></div>
+<div class="kpi"><div class="v">6–10</div><div class="l">Target by Q2 2027 (with cache + distillation active)</div></div>
+<div class="kpi"><div class="v">≥60%</div><div class="l">Activation — % completing onboarding + first workout in 7 days</div></div>
+<div class="kpi"><div class="v">≥65%</div><div class="l">MoM active user retention (D2C, Year 1)</div></div>
+<div class="kpi"><div class="v">$216K</div><div class="l">Year 1 ARR target (realistic scenario)</div></div>
+<div class="kpi"><div class="v">0</div><div class="l">Adverse events from AI guidance (always — safety first)</div></div>
+</div>
+
+<h3>1.5 Go / No-Go Assessment</h3>
+<table>
+<tr><th>Dimension</th><th>Assessment</th><th>Verdict</th></tr>
+<tr><td>Market Timing</td><td><span class="tag t-green">Strong</span> — AI fitness coaching apps: $6.2B (2025) → $46.8B (2034) at 25.1% CAGR (MarketIntelo). AI personal trainers: $15.72B (2025) → $54.95B (2030) at 28.9% CAGR (TBRC). Hyper-personalized fitness: $5.5B (2026) → $31.1B (2036) at 18.9% CAGR (FMI). AI coaching institutionalising as standard expectation. Wearable data abundant (520M units shipped 2025).</td><td><span class="tag t-green">✅ GO</span></td></tr>
+<tr><td>Product Readiness</td><td><span class="tag t-green">Strong</span> — v2.0 functional: 12 agents, 17 endpoints, onboarding (733 lines), plan gen (F02 Gemini + deterministic fallback), workout logging + adaptation trigger (F05), coaching chat (F06), recovery analysis (F04 rules-based), form cues (F07), nutrition advisor (F08), check-ins (F09 save-only), wearable ingestion endpoints (F10), compliance gate (F11 consent + injury filter). Governance layer designed, documented, not implemented.</td><td><span class="tag t-green">✅ GO</span></td></tr>
+<tr><td>Competitive Position</td><td><span class="tag t-amber">Differentiated but crowded</span> — Multi-agent mesh + governance + 6-device wearables + adaptive recovery-driven plans + integrated coaching dimensions is unique. But D2C crowded (Fitbod 15M+ downloads, Freeletics 59M+ users, WHOOP premium, Peloton, Apple Fitness+). B2B coach segment less crowded. Mitigate: B2B coach beachhead + governance-as-moat + Dubai/MENA first mover.</td><td><span class="tag t-amber">🟡 GO with focus</span></td></tr>
+<tr><td>Unit Economics</td><td><span class="tag t-green">Strong</span> — Gemini 3.5 Flash $1.50/$9.00 per MTok (from Jan 2027). Est. 215K tokens/user/week moderate → ~$2.06/user/week API cost → ~$9/mo. Subscription $19.99–$29.99 → 85–93% gross margin on API cost alone. Cache + distillation + model-tier routing further reduce. Transparency is selling point vs black-box competitor costs.</td><td><span class="tag t-green">✅ GO</span></td></tr>
+<tr><td>Team</td><td><span class="tag t-green">Strong</span> — Solo founder with full-stack: architecture, engineering, product, AI (Gemini), Firebase, React, server-side orchestration. Plus PLOS 183-skill library + 6 decision gates as PM force multiplier. PolyVerses orchestration pattern proven.</td><td><span class="tag t-green">✅ GO</span></td></tr>
+<tr><td>Safety/Liability</td><td><span class="tag t-amber">Manageable</span> — F11 compliance gate + injury filter on F02 plan gen + medical disclaimer rules in F06/F07/F08 system prompts + health data consent gate + GDPR/CCPA deletion endpoint (server.ts lines 607–627). Disclaimers on every medical query. Wellness product, not medical device. Risk: cannot eliminate — must manage with clear disclaimers, consent gates, safety-first prompts.</td><td><span class="tag t-amber">🟡 GO with guardrails</span></td></tr>
+<tr><td>Execution Risk</td><td><span class="tag t-amber">Solo founder bandwidth</span> — platform growth (B2B sales, marketing, App Store, partnerships, content) needs bandwidth beyond engineering. Mitigate: B2B coach beachhead reduces D2C acquisition burden; automate D2C via content; PLOS skills augment PM capacity; mobile + Stripe + push are separate phases, not v1.0 blockers.</td><td><span class="tag t-amber">🟡 GO with mitigation</span></td></tr>
+<tr><td>Funding Need</td><td><span class="tag t-green">Low</span> — API costs scale with users; no inventory, hardware, or major infra. Bootstrapping to $216K ARR (Y1 realistic) feasible. External capital optional for acceleration (growth marketing, mobile dev agency, sales hire).</td><td><span class="tag t-green">✅ GO</span></td></tr>
+</table>
+
+<div class="verdict">
+  <strong>VERDICT: GO — with a B2B (coach) beachhead and governance-as-moat positioning.</strong>
+  <p>Market is large and growing fast (25%+ CAGR). Product is functional and differentiated (12-agent mesh, 6-device wearables, adaptive recovery-driven plans, integrated coaching dimensions). Unit economics strong ($2–4/mo API cost vs $19.99–$29.99 subscription = 85–93% gross margin). Safety manageable with F11 compliance gate + disclaimers + consent gates. Execute v2.0 launch, govern platform (Phase 1–5), monetise via three-tier subscriptions, expand to B2B coaching → gyms → corporate wellness → wearable partnerships. Use PLOS as PM co-pilot for all product decisions (Option A first), then document PolySync as PLOS case study (Option B), then unify knowledge infrastructure (Option C).</p>
+</div>
+
+<h3>1.6 Executive Recommendations</h3>
+<table>
+<tr><th>#</th><th>Recommendation</th><th>Priority</th><th>Rationale</th></tr>
+<tr><td>R1</td><td><strong>Ship v1.0 now</strong> — market growing at 25%+ CAGR. Every month of delay is missed TAM capture. v2.0 is functional. Only gaps are governance layer (designed, not implemented) and payments/mobile (future). Ship the app.</td><td><span class="tag t-green">P0</span></td><td>Market timing. Product readiness. First-mover advantage on governed agentic fitness coaching.</td></tr>
+<tr><td>R2</td><td><strong>Governance layer is the moat</strong> — competitors ship AI fast but without governance (no token budgets, circuit breakers, human gates, distillation). This is PolySync's sustainable differentiator. Implement Phase 1–3 in Q1 2027 as priority sprint. Market governance story to B2B customers.</td><td><span class="tag t-green">P0</span></td><td>Differentiation. B2B selling point. Cost control. Safety. No competitor has this.</td></tr>
+<tr><td>R3</td><td><strong>Monetise via three-tier model immediately</strong> — Free → Premium ($19.99/mo) → Elite ($29.99/mo). Tier features defined in types.ts. Even before Stripe, use manual payment/upgrade flow (invoice, coupon code, admin console) to start collecting revenue. Unit economics work: $2–4/mo API cost vs $19.99–$29.99 subscription.</td><td><span class="tag t-green">P1</span></td><td>Revenue start. Validates WTP. Funds further development.</td></tr>
+<tr><td>R4</td><td><strong>Prioritise B2B (coaches) as beachhead</strong> — D2C crowded (Fitbod, Freeletics, WHOOP, Peloton, Apple). B2B — independent coaches who want AI co-pilot — less crowded, higher WTP ($30–100/mo), clear ROI (saves 10+ hrs/wk). Coach with 20 clients at $79.99/mo = 4 D2C Premium users at $19.99/mo with same token cost.</td><td><span class="tag t-green">P1</span></td><td>Less crowded. Higher WTP. Clear ROI. Coach as distribution channel. Same token cost, higher revenue.</td></tr>
+<tr><td>R5</td><td><strong>Build agent SDK / API in parallel</strong> — agent mesh is the product, not just the app. Publishing consumable API + SDK (2027) allows third-party coaches, apps, wearable brands to invoke PolySync agents. Creates platform moat — once workflow built on PolySync agents, switching costs high. Start API docs Q1 2027; ship SDK Q2 2027.</td><td><span class="tag t-amber">P2</span></td><td>Platform moat. Third-party distribution. Wearable partnership path.</td></tr>
+<tr><td>R6</td><td><strong>Go to Dubai first, then global</strong> — founder in Dubai, UAE. High health awareness, strong disposable income, growing fitness culture, less crowded D2C competition than US/UK. Launch beta in Dubai → collect testimonials/case studies → expand to UK/US (NA 38.2% of AI fitness coaching app revenue, Europe #2).</td><td><span class="tag t-amber">P2</span></td><td>Lower initial competition. Founder location. Proof point for global expansion.</td></tr>
+<tr><td>R7</td><td><strong>PLOS as PM co-pilot (Option A) first sprint</strong> — invoke AI Safety-by-Architecture Reviewer + Human-in-the-Loop Product Architect on GAPS.md entries + architecture decisions. Measure % of decisions where PLOS skill input changed outcome. Augments solo founder PM capacity.</td><td><span class="tag t-amber">P2</span></td><td>PM capacity. Decision quality. Force multiplier for solo founder.</td></tr>
+<tr><td>R8</td><td><strong>CV form analysis for Elite tier (2027–2028)</strong> — F07 Form Coach is text-based now. Computer vision for real-time form correction is major enhancement. Aligned with market trend (Soul AI launched CV wearable Sept 2025). Elite tier roadmap mentions "Early access: CV form analysis, AR coaching."</td><td><span class="tag t-gray">P3</span></td><td>Differentiation. Aligned with market trend. Elite upsell.</td></tr>
+</table>
+</div>
