@@ -1,37 +1,46 @@
 // PolyVerses AI Fitness Coach — Type Definitions
 // Extends the architecture with fitness-domain types
 
+// Allow flexible goal strings (server uses both "build_muscle" style and "strength" style)
+export type FitnessGoal = string;
+
 export interface FitnessProfile {
-  uid: string;
-  email: string;
-  displayName: string;
+  uid?: string;
+  email?: string;
+  displayName?: string;
 
   // Goals & level
-  goal: 'strength' | 'hypertrophy' | 'endurance' | 'weight_loss' | 'general_fitness' | 'maintain' | 'sport_specific';
+  goal: FitnessGoal;
   level: 'beginner' | 'intermediate' | 'advanced';
   focus: string[];
 
   // Constraints
-  injuries: string[];                // e.g. ['left knee pain', 'lower back tightness']
-  equipment: string[];               // e.g. ['dumbbells', 'barbell', 'pull-up bar', 'none']
-  daysPerWeek: number;               // 1–7
-  sessionDuration: number;           // minutes, typically 15–90
-  availableDays: string[];           // optional: ['Mon', 'Wed', 'Fri']
+  injuries: string[];
+  equipment: string[];
+  daysPerWeek: number;
+  sessionDuration: number;
+  availableDays?: string[];
 
   // Biometrics (optional)
-  weight?: number;                   // kg or lb — user-specifies unit
+  weight?: number;
   height?: number;
   age?: number;
   gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say';
 
   // Consent flags
-  healthDataConsent: boolean;        // required before wearable data processing
-  disclaimerAccepted: boolean;       // required before first workout
+  healthDataConsent: boolean;
+  disclaimerAccepted?: boolean;
+
+  // Special mode
+  specialMode?: string;
 
   // Metadata
-  createdAt: number;                 // Unix ms
-  updatedAt: number;
+  createdAt?: any;
+  updatedAt?: any;
+  userId?: string;
 }
+
+export type HealthDataConsent = { healthDataConsent: boolean; }
 
 export interface WorkoutLogEntry {
   id: string;
@@ -125,7 +134,7 @@ export interface PlanWorkout {
   focus: string;
   estimatedDuration: number;         // minutes
   warmup?: string[];                 // exercise IDs for warmup
-  mainExercises: PlanExercise[];
+  mainExercises: WorkoutExercise[];
   cooldown?: string[];               // exercise IDs for cooldown / stretch
 }
 
@@ -410,166 +419,6 @@ export interface ChatResponse {
   suggestions?: string[];            // follow-up prompts the coach suggests
 }
 
-export interface LogWorkoutRequest {
-  userId: string;
-  planId: string;
-  dayIndex: number;
-  exercises: WorkoutExercise[];
-  duration: number;
-  overallRpe?: number;
-  notes?: string;
-  completed: boolean;
-  skippedExercises?: string[];
-  modifiedExercises?: ModifiedExercise[];
-}
-
-export interface RecoveryRequest {
-  userId: string;
-  wearableData: WearableDataPoint[];
-  recentWorkoutCount: number;        // workouts in last 7 days
-  checkInData?: CheckIn[];
-}
-
-export interface RecoveryResponse {
-  assessment: RecoveryAssessment;
-  recommendation: 'train_normal' | 'reduce_intensity' | 'rest_day' | 'active_recovery';
-  explanation: string;
-}
-
-export interface AdaptPlanRequest {
-  userId: string;
-  currentPlanId: string;
-  completedWorkouts: string[];       // workout log IDs completed this week
-  skippedWorkouts: string[];
-  recoveryAssessment?: RecoveryAssessment;
-  userFeedback?: string;             // free text from user
-}
-
-export interface AdaptPlanResponse {
-  adaptedPlan: WeeklyPlan;
-  changes: PlanChange[];
-  rationale: string;
-}
-
-export interface PlanChange {
-  type: 'added_exercise' | 'removed_exercise' | 'modified_volume' | 'modified_intensity' | 'swapped_day' | 'rest_day_added' | 'rest_day_removed';
-  description: string;
-  affectedDayIndex?: number;
-  affectedExerciseId?: string;
-}
-
-export interface ExerciseInput {
-  id: string;
-  name: string;
-  category: string;
-  targetMuscles: string[];
-  secondaryMuscles: string[];
-  equipment: string[];
-  difficulty: string;
-  instructions: string;
-  commonMistakes: string[];
-  substitutionIds: string[];
-  videoUrl?: string;
-}
-
-export interface Workout {
-  workoutId: string;
-  workoutName: string;
-  focus: string;
-  duration: number;
-  exercises: ExerciseInput[];
-}
-
-export interface DailyWorkout {
-  dayIndex: number;
-  date: string;
-  recoveryRecommendation?: string;
-  workouts: Workout[];
-}
-
-export interface PlanOutput {
-  weekNumber: number;
-  startDate: string;
-  endDate: string;
-  days: DailyWorkout[];
-  version: number;
-  userId?: string;
-  createdAt?: any;
-  updatedAt?: any;
-}
-
-export interface WorkoutLogEntry {
-  userId?: string;
-  planId: string;
-  dayIndex: number;
-  workoutName: string;
-  focus: string;
-  exercises: WorkoutExercise[];
-  totalDuration?: number;
-  rpe?: number;
-  notes?: string;
-  completed: boolean;
-  skipped: boolean;
-  modified: boolean;
-  substitutions?: { exerciseId: string; reason: string }[];
-  createdAt: any;
-}
-
-export interface ExerciseSubstitute {
-  exerciseId: string;
-  name: string;
-  targetMuscles: string[];
-  equipment: string[];
-  difficulty: string;
-  reason: string;
-}
-
-export interface RecoveryInput {
-  sleepDuration?: number;          // hours
-  sleepQuality?: number;           // 1-5
-  hrv?: number;                    // ms
-  restingHeartRate?: number;       // bpm
-  steps?: number;
-  activeCalories?: number;
-  workoutFrequency?: number;       // workouts in last 7 days
-  energyLevel?: number;            // 1-5
-  mood?: number;                   // 1-5
-  motivationLevel?: number;        // 1-5
-}
-
-export interface ChatRequest {
-  message: string;
-  sessionId?: string;
-}
-
-export interface ChatResponse {
-  response: string;
-  sandbox: boolean;
-}
-
-export interface NutritionRequest {
-  query: string;
-  profile?: FitnessProfile;
-}
-
-export interface NutritionResponse {
-  guidance: string;
-  disclaimer: string;
-  sandbox: boolean;
-}
-
-export interface CheckInInput {
-  workoutId?: string;
-  energyLevel?: number;       // 1-5
-  mood?: number;              // 1-5
-  painOrIssues?: string;
-  sleepQuality?: number;      // 1-5
-  sleepDuration?: number;     // minutes
-  motivationLevel?: number;   // 1-5
-  workoutCompleted?: boolean;
-  notes?: string;
-}
-
 export type SubscriptionTier = 'free' | 'premium' | 'elite';
 
 export interface UserSubscription {
@@ -611,3 +460,193 @@ export const TIER_FEATURES: Record<SubscriptionTier, string[]> = {
     'Early access to new features (CV form analysis, AR coaching)',
   ],
 };
+
+// ─── Legacy / Server-Compatibility Types ────────────────────────────
+// These support the server.ts endpoint signatures and
+// PolyVerses-era code paths in components.
+
+export interface ServerCompatibilityPlanOutputV0 {
+  weekNumber: number;
+  startDate: string;
+  endDate: string;
+  days: ServerCompatibilityDayV0[];
+  version: number;
+  userId?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface ServerCompatibilityDayV0 {
+  dayIndex: number;
+  date: string;
+  recoveryRecommendation?: string;
+  workouts: ServerCompatibilityWorkoutV0[];
+}
+
+export interface PlanChange {
+  type: 'added_exercise' | 'removed_exercise' | 'modified_volume' | 'modified_intensity' | 'swapped_day' | 'rest_day_added' | 'rest_day_removed';
+  description: string;
+  affectedDayIndex?: number;
+  affectedExerciseId?: string;
+}
+
+export interface ServerCompatibilityWorkoutV0 {
+  workoutId: string;
+  workoutName: string;
+  focus: string;
+  duration: number;
+  exercises: ExerciseInputCompat[];
+}
+
+export interface ServerCompatibilityExerciseInputV0 {
+  id: string;
+  name: string;
+  category: string;
+  muscles: string[];             // ExerciseLibrary uses `muscles`; server compat alias
+  targetMuscles: string[];       // types.ts canonical name
+  secondaryMuscles: string[];
+  equipment: string[];
+  difficulty: string;
+  instructions: string;
+  commonMistakes: string[];
+  substitutionIds: string[];
+  videoUrl?: string;
+}
+
+export interface ExerciseInputCompat {
+  id: string;
+  name: string;
+  category: string;
+  muscles: string[];
+  targetMuscles: string[];
+  secondaryMuscles: string[];
+  equipment: string[];
+  difficulty: string;
+  instructions: string;
+  commonMistakes: string[];
+  substitutionIds: string[];
+  videoUrl?: string;
+}
+
+export type ExerciseInput = ExerciseInputCompat;
+export type PlanOutput = ServerCompatibilityPlanOutputV0;
+export type PlanOutputCompat = ServerCompatibilityPlanOutputV0;
+export type RecoveryInput = ServerCompatRecoveryInput;
+export type CheckInInput = ServerCompatCheckInInput;
+export type NutritionRequest = ServerCompatNutritionRequest;
+export type NutritionResponse = ServerCompatNutritionResponse;
+export type DailyWorkday = ServerCompatibilityDayV0;
+export type Exercise = ExerciseInputCompat;
+export interface ServerCompatibilityLog {
+  userId?: string;
+  planId: string;
+  dayIndex: number;
+  workoutName: string;
+  focus: string;
+  exercises: WorkoutExercise[];
+  totalDuration?: number;
+  rpe?: number;
+  notes?: string;
+  completed: boolean;
+  skipped: boolean;
+  modified: boolean;
+  substitutions?: { exerciseId: string; reason: string }[];
+  createdAt: any;
+}
+
+export interface ServerCompatibilitySubstitute {
+  exerciseId: string;
+  name: string;
+  targetMuscles: string[];
+  equipment: string[];
+  difficulty: string;
+  reason: string;
+}
+
+// Server helper request/response bundles (legacy)
+export interface ServerCompatLogWorkoutRequest {
+  userId: string;
+  planId: string;
+  dayIndex: number;
+  exercises: WorkoutExercise[];
+  duration: number;
+  overallRpe?: number;
+  notes?: string;
+  completed: boolean;
+  skippedExercises?: string[];
+  modifiedExercises?: ModifiedExercise[];
+}
+
+export interface ServerCompatRecoveryRequest {
+  userId: string;
+  wearableData: WearableDataPoint[];
+  recentWorkoutCount: number;
+  checkInData?: CheckIn[];
+}
+
+export interface ServerCompatRecoveryResponse {
+  assessment: RecoveryAssessment;
+  recommendation: 'train_normal' | 'reduce_intensity' | 'rest_day' | 'active_recovery';
+  explanation: string;
+}
+
+export interface ServerCompatAdaptPlanRequest {
+  userId: string;
+  currentPlanId: string;
+  completedWorkouts: string[];
+  skippedWorkouts: string[];
+  recoveryAssessment?: RecoveryAssessment;
+  userFeedback?: string;
+}
+
+export interface ServerCompatAdaptPlanResponse {
+  adaptedPlan: WeeklyPlan;
+  changes: PlanChange[];
+  rationale: string;
+}
+
+export interface ServerCompatRecoveryInput {
+  sleepDuration?: number;
+  sleepQuality?: number;
+  hrv?: number;
+  restingHeartRate?: number;
+  steps?: number;
+  activeCalories?: number;
+  workoutFrequency?: number;
+  energyLevel?: number;
+  mood?: number;
+  motivationLevel?: number;
+}
+
+export interface ServerCompatChatRequestLegacy {
+  message: string;
+  sessionId?: string;
+}
+
+export interface ServerCompatChatResponseLegacy {
+  response: string;
+  sandbox: boolean;
+}
+
+export interface ServerCompatNutritionRequest {
+  query: string;
+  profile?: FitnessProfile;
+}
+
+export interface ServerCompatNutritionResponse {
+  guidance: string;
+  disclaimer: string;
+  sandbox: boolean;
+}
+
+export interface ServerCompatCheckInInput {
+  workoutId?: string;
+  energyLevel?: number;       // 1-5
+  mood?: number;              // 1-5
+  painOrIssues?: string;
+  sleepQuality?: number;      // 1-5
+  sleepDuration?: number;     // minutes
+  motivationLevel?: number;   // 1-5
+  workoutCompleted?: boolean;
+  notes?: string;
+}

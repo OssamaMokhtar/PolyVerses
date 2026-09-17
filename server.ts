@@ -12,11 +12,200 @@ import {
 import crypto from "crypto";
 import {
   FitnessProfile, WeeklyPlan, WorkoutLogEntry, CheckIn,
-  RecoveryAssessment, WorkoutExercise, ExerciseInput, PlanOutput,
-  RecoveryInput, ChatRequest, ChatResponse, NutritionRequest,
-  NutritionResponse, CheckInInput, HealthDataConsent
+  RecoveryAssessment, WorkoutExercise, ExerciseInputCompat, PlanOutputCompat,
+  RecoveryInput, CheckInInput, NutritionRequest,
+  NutritionResponse, ChatRequest, ChatResponse,
+  PlanExercise, PlanWorkout, PlanDay, DailyWorkday as DailyWorkout, Exercise, ModifiedExercise,
+  WearableDataPoint, RecoveryFactor, HealthDataConsent
 } from "./src/types";
-import { findExerciseSubstitution, EXERCISE_LIBRARY } from "./src/ExerciseLibrary";
+import { EXERCISE_LIBRARY, getSubstituteExercises } from "./src/ExerciseLibrary";
+
+// Week, date formatting helpers
+function getWeekNumber(date: Date): number {
+  const startOfYear = new Date(date.getFullYear(), 0, 1);
+  const diff = Math.floor((date.getTime() - startOfYear.getTime()) / 86400000);
+  return Math.ceil((diff + startOfYear.getDay() + 1) / 7);
+}
+
+function formatDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function computeRecoveryScore(input: RecoveryInput): {
+  score: number;
+  recommendation: "rest" | "train_normal" | "reduce_intensity" | "reduce_volume";
+  text: string;
+  factors: { name: string; value: string; impact: "positive" | "negative" }[];
+  dataSources: string[];
+  dataAgeHours: number;
+} {
+  let score = 50;
+  const factors: { name: string; value: string; impact: "positive" | "negative" }[] = [];
+
+  if (input.sleepDuration && input.sleepDuration >= 7) {
+    score += 20;
+    factors.push({ name: "sleep", value: `${input.sleepDuration}h`, impact: "positive" });
+  } else if (input.sleepDuration && input.sleepDuration < 6) {
+    score -= 15;
+    factors.push({ name: "sleep", value: `${input.sleepDuration}h`, impact: "negative" });
+  }
+
+  if (input.hrv && input.hrv > 60) {
+    score += 10;
+    factors.push({ name: "hrv", value: `${input.hrv}ms`, impact: "positive" });
+  }
+
+  if (input.restingHeartRate && input.restingHeartRate < 60) {
+    score += 5;
+    factors.push({ name: "resting_hr", value: `${input.restingHeartRate}bpm`, impact: "positive" });
+  } else if (input.restingHeartRate && input.restingHeartRate > 75) {
+    score -= 10;
+    factors.push({ name: "resting_hr", value: `${input.restingHeartRate}bpm`, impact: "negative" });
+  }
+
+  if (input.activeCalories && input.activeCalories > 500) {
+    factors.push({ name: "activity", value: `${input.activeCalories}cal`, impact: "positive" });
+  }
+
+  if (input.energyLevel && input.energyLevel < 3) {
+    score -= 10;
+    factors.push({ name: "energy", value: `${input.energyLevel}/5`, impact: "negative" });
+  }
+
+  if (score >= 80) {
+    return { score, recommendation: "train_normal", text: "You're well-recovered. Train normally.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  } else if (score >= 60) {
+    return { score, recommendation: "reduce_intensity", text: "Moderate recovery — consider lighter intensity today.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  } else if (score >= 40) {
+    return { score, recommendation: "reduce_volume", text: "Low recovery — reduce volume or take active recovery.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  } else {
+    return { score, recommendation: "rest", text: "Poor recovery — rest today and focus on sleep and nutrition.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  }
+}
+
+async function generateDeterministicPlan(profile: FitnessProfile): Promise<WeeklyPlan> {
+  const exercises = EXERCISE_LIBRARY;
+  const startOfWeek = new Date();
+  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const days: PlanDay[] = [];
+  const exercisesPerDay = profile.goal === "build_muscle" ? 5 :
+    profile.goal === "lose_weight" ? 6 :
+    profile.goal === "improve_endurance" ? 5 : 4;
+
+  for (let i = 0; i < profile.daysPerWeek; i++) {
+    const dayExercises: WorkoutExercise[] = exercises
+      .slice(0, exercisesPerDay)
+      .map((ex, idx) => ({
+        exerciseId: ex.exerciseId,
+        name: ex.name,
+        category: ex.category,
+        primaryMuscles: ex.primaryMuscles,
+        prescribedSets: idx < 2 ? 4 : 3,
+        prescribedReps: ex.primaryMuscles.length > 1 ? "8-12" : "12-15",
+        prescribedRestSeconds: 60 + idx * 10,
+        sets: [],
+      }));
+
+    days.push({
+      dayIndex: i,
+      date: startOfWeek.getTime() + i * 86400000,
+      dayLabel: ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][i] as string,
+      focus: profile.goal === "build_muscle" ? "Upper Body Strength" :
+             profile.goal === "lose_weight" ? "Full Body HIIT" :
+             profile.goal === "improve_endurance" ? "Cardio & Core" : "General Fitness",
+      workouts: [{
+        id: crypto.randomUUID(),
+        name: `Workout ${i + 1}`,
+        focus: profile.goal === "build_muscle" ? "Upper Body Strength" :
+               profile.goal === "lose_weight" ? "Full Body HIIT" :
+               profile.goal === "improve_endurance" ? "Cardio & Core" : "General Fitness",
+        estimatedDuration: profile.sessionDuration,
+        warmup: [],
+        mainExercises: dayExercises,
+        cooldown: [],
+      }],
+    });
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    userId: profile.uid ?? "unknown",
+    weekNumber: getWeekNumber(startOfWeek),
+    startDate: startOfWeek.getTime(),
+    version: 1,
+    days,
+    generatedBy: "F02",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+async function savePlan(uid: string, plan: WeeklyPlan): Promise<void> {
+  const planRef = doc(db, "users", uid, "plans", plan.id);
+  await setDoc(planRef, {
+    ...plan,
+    createdAt: plan.createdAt ?? serverTimestamp(),
+    updatedAt: plan.updatedAt ?? serverTimestamp(),
+  } as any, { merge: true });
+}
+
+function findExerciseSubstitution(
+  exerciseId: string,
+  preferredEquipment?: string[]
+): { exerciseId: string; name: string; targetMuscles: string[]; equipment: string[]; difficulty: string; reason: string }[] {
+  const substitutes: { exerciseId: string; name: string; targetMuscles: string[]; equipment: string[]; difficulty: string; reason: string }[] = [];
+  const exercise = EXERCISE_LIBRARY.find(e => e.exerciseId === exerciseId);
+  if (!exercise) return substitutes;
+
+  for (const ex of EXERCISE_LIBRARY) {
+    if (ex.exerciseId === exerciseId) continue;
+    if (preferredEquipment && !ex.equipment?.some(e => preferredEquipment.includes(e))) continue;
+    if (ex.primaryMuscles.some(m => exercise.primaryMuscles.includes(m))) {
+      substitutes.push({
+        exerciseId: ex.exerciseId,
+        name: ex.name,
+        targetMuscles: ex.primaryMuscles,
+        equipment: ex.equipment,
+        difficulty: ex.difficulty,
+        reason: "Target muscle overlap",
+      });
+    }
+  }
+
+  return substitutes.slice(0, 5);
+}
+
+async function generateAdaptation(
+  uid: string,
+  workout: WorkoutLogEntry
+): Promise<WeeklyPlan | null> {
+  try {
+    const planSnap = await getDocs(query(
+      collection(db, "users", uid, "plans"),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    ));
+    if (planSnap.empty) return null;
+
+    const plan = planSnap.docs[0].data() as WeeklyPlan;
+    plan.version = (plan.version ?? 1) + 1;
+    plan.adaptationReason = "Workout completed — progressive adaptation";
+    plan.adaptedFromPlanId = plan.id;
+    await savePlan(uid, plan);
+    return plan;
+  } catch {
+    return null;
+  }
+}
 
 dotenv.config();
 
@@ -79,57 +268,7 @@ async function startServer() {
 
   // --- API ROUTE FOR AGENT WORKFLOW EVALUATIONS ---
   app.post("/api/evaluate", async (req: express.Request, res: express.Response): Promise<void> => {
-    const { prompt, priority, role, agentType, userContext } = req.body;
-
-    const actualPriority = priority || "Medium";
-    const actualRole = role || "PM";
-    const inputPrompt = prompt || "Build structured Slack Integration feature";
-
-    // In case API Key is missing, generate high-fidelity simulated outputs so the app remains pristine
-    if (!ai) {
-      const sandboxResponse = generateSandboxResponse(agentType, inputPrompt, actualPriority, actualRole, userContext);
-      res.json({ text: sandboxResponse, sandbox: true });
-      return;
-    }
-
-    try {
-      let systemInstruction = "";
-      let modelPrompt = "";
-
-      if (agentType === "opportunity") {
-        systemInstruction = "You are the specialized Opportunity Planning Agent of PolyVerses v3.1. Master of RICE prioritization (Reach, Impact, Confidence, Effort). Analyze the product concept and output a clean Markdown summary containing a comparative RICE scorecard (scoring Reach, Impact scale 1-3, Confidence percentage, Effort in months, and final rounded RICE Score). Present it in a sleek markdown table followed by a 2-bullet point strategic recommendation. Keep it within 300 words.";
-        modelPrompt = `Evaluate this product idea: "${inputPrompt}". Role requested: ${actualRole}. Priority setting: ${actualPriority}. Construct the math metrics based on realistic product estimates.`;
-      } else if (agentType === "compliance") {
-        systemInstruction = "You are the automated Compliance Auditor Agent of PolyVerses v3.1. Expert in GDPR, CCPA, and global client-PII safeguards. Analyze the requested product concept and check for critical data handling compliance concerns. Output a Markdown document with three sections: 1. STRENGTHS (any compliance-positive structures), 2. WARNINGS (specific CCPA/GDPR/HIPAA telemetry or consent vulnerabilities found), and 3. DETAILED ACTIONABLE REMEDIATIONS (numbered steps to resolve, including Neo4j delete evictions and Pinecone text-hashing). Keep it highly professional and concise (under 300 words).";
-        modelPrompt = `Scrub compliance safeguards on this product request: "${inputPrompt}". User parameters: [Role: ${actualRole}, Priority: ${actualPriority}].`;
-      } else if (agentType === "prd") {
-        systemInstruction = "You are the advanced PRD Generation Agent of PolyVerses v3.1. You author exhaustive, production-grade Product Requirements Documents. Output an elegant, highly structured markdown PRD containing: 1. Executive goals, 2. Target Audiences (PM, Eng, Ops), 3. Success telemetry Metrics (with precise targets), 4. Architectural requirements (EKS microservices, Redis priority streams), and 5. Precise Service Level Agreements (SLAs on multi-region RTO/RPO limits). Do not use placeholders. Write actual concrete metrics and logic matching the concept. Keep it under 500 words.";
-        modelPrompt = `Generate the ultimate technical PRD for this concept: "${inputPrompt}". Active Role: ${actualRole}. Target priority weight: ${actualPriority}. Include robust engineering specifications.`;
-      } else if (agentType === "rollback") {
-        systemInstruction = "You are the critical Rollback Orchestrator Agent of PolyVerses v3.1. Monitor the performance matrix of the active deployment. Based on the user prompt, render a structured Markdown report highlighting simulated SRE telemetry health checks, error rates, p95 latencies, and explicit status representing whether the deployment is safe, at risk, or if an automated rollback workflow has been triggered. Keep it action-oriented and under 250 words.";
-        modelPrompt = `Perform release error budget analysis on the concept: "${inputPrompt}" running on Active US-East cloud instances.`;
-      } else {
-        // Default Router Orchestrator
-        systemInstruction = "You are the primary PolyVerses v3.1 Orchestrator Router. Guide the product leader on the multi-agent execution pipeline. Synthesize proactive insights regarding the input request and list how the 23-agent network will split duties to deliver. Mention the primary active-passive failover state for the database replica in us-east-1 and wewest-1. Keep it professional, motivating, and clean. Under 300 words.";
-        modelPrompt = `Analyze the initial signals for this idea: "${inputPrompt}". State how the PolyVerses second-brain starts the orchestration.`;
-      }
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: modelPrompt,
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.7,
-        }
-      });
-
-      const responseText = response.text || "Failed to retrieve generated response.";
-      res.json({ text: responseText, sandbox: false });
-    } catch (err: any) {
-      console.error("Gemini invocation error, reverting to sandbox generator:", err);
-      const fallback = generateSandboxResponse(agentType, inputPrompt, actualPriority, actualRole, userContext);
-      res.json({ text: fallback, error: err.message, sandbox: true });
-    }
+    res.status(410).json({ error: "This endpoint has been replaced by the PolySync fitness coaching API. Use /api/fitness/* endpoints instead." });
   });
 
   // ─── PolySync Fitness API Routes ──────────────────────────────────────────
@@ -234,27 +373,27 @@ async function startServer() {
             plan = JSON.parse(text);
           } catch {
             console.error("Failed to parse Gemini plan response:", text);
-            plan = generateDeterministicPlan(profile);
+            plan = generateDeterministicPlan(profile as any);
           }
           plan.userId = uid;
-          plan.createdAt = serverTimestamp() as any;
-          plan.updatedAt = serverTimestamp() as any;
+          plan.createdAt = Date.now() as any;
+          plan.updatedAt = Date.now() as any;
           await savePlan(uid, plan);
           res.json({ plan, generatedBy: "gemini" });
         } catch (geminiErr) {
           console.error("Gemini plan generation failed, using deterministic fallback:", geminiErr);
-          const plan = generateDeterministicPlan(profile);
+          const plan = await generateDeterministicPlan(profile as any);
           plan.userId = uid;
-          plan.createdAt = serverTimestamp() as any;
-          plan.updatedAt = serverTimestamp() as any;
+          plan.createdAt = Date.now() as any;
+          plan.updatedAt = Date.now() as any;
           await savePlan(uid, plan);
           res.json({ plan, generatedBy: "deterministic" });
         }
       } else {
-        const plan = generateDeterministicPlan(profile);
+        const plan = await generateDeterministicPlan(profile as any);
         plan.userId = uid;
-        plan.createdAt = serverTimestamp() as any;
-        plan.updatedAt = serverTimestamp() as any;
+        plan.createdAt = Date.now() as any;
+        plan.updatedAt = Date.now() as any;
         await savePlan(uid, plan);
         res.json({ plan, generatedBy: "deterministic" });
       }
@@ -1125,98 +1264,101 @@ function computeRecoveryScore(input: RecoveryInput): {
     dataAgeHours: 0,
   };
 }
-function generateSandboxResponse(type: string, prompt: string, priority: string, role: string, userContext: any): string {
-  const brand = userContext?.productName || "PolyVerses Suite";
+// ─── Fitness Sandbox Helpers ────────────────────────────────────────────────
+// Fallback responses when Gemini API is unavailable or returns an error.
+// Each agent has its own sandbox generator that produces realistic, safe output.
+
+function sandboxProfileSaved(profile: FitnessProfile): string {
+  return `✅ Profile saved successfully (sandbox mode).
+Goal: ${profile.goal}
+Level: ${profile.level}
+Injuries: ${profile.injuries.join(", ") || "none"}
+Equipment: ${profile.equipment.join(", ") || "none"}
+Days/week: ${profile.daysPerWeek}
+Session duration: ${profile.sessionDuration}min
+Focus areas: ${profile.focus.join(", ") || "full_body"}
+Health data consent: ${profile.healthDataConsent}
+Special mode: ${profile.specialMode || "none"}`;
+}
+
+function sandboxPlanGenerated(profile: FitnessProfile, plan: WeeklyPlan): string {
+  const daysStr = plan.days.map(d => {
+    const workout = d.workouts[0];
+    return `  Day ${d.dayIndex} (${d.date}): ${workout?.workoutName || "Rest"} — ${workout?.exercises?.length || 0} exercises`;
+  }).join("\n");
+  return `✅ Weekly plan generated (sandbox mode) — Week ${plan.weekNumber}
+${daysStr}
+
+Note: This is a simulated response. Connect GEMINI_API_KEY for real AI-powered plan generation.`;
+}
+
+function sandboxWorkoutLogged(profile: FitnessProfile): string {
+  return `✅ Workout logged (sandbox mode).
+Adaptation summary: ${profile.goal === "build_muscle" ? "Progressive overload applied — next week's volume increased by ~10%." : profile.goal === "lose_weight" ? "Maintained intensity — next week focuses on consistency and recovery." : "Plan maintained — continue building the habit."}
+Note: Connect GEMINI_API_KEY for real adaptation analysis.`;
+}
+
+function sandboxChatResponse(message: string, profile: FitnessProfile | null): string {
+  const userContext = profile ? ` (goal: ${profile.goal}, level: ${profile.level})` : "";
+  if (message.toLowerCase().includes("injury") || message.toLowerCase().includes("pain")) {
+    return `⚠️ I'm an AI fitness coach, not a medical professional. If you're experiencing pain or have an injury concern, please consult a healthcare provider or physical therapist.
+In the meantime: rest the affected area, avoid exercises that cause pain, and let me know your injury so I can adjust your workout plan to work around it.`;
+  }
+  if (message.toLowerCase().includes("nutrition") || message.toLowerCase().includes("diet") || message.toLowerCase().includes("food")) {
+    return `🥗 Great question about nutrition${userContext}!
+General guidance: focus on protein intake (${profile?.level === "advanced" ? "1.6-2.2g per kg of bodyweight" : "0.8-1.2g per kg"}), stay hydrated (2-3L water/day), and eat a balanced mix of complex carbs, lean protein, and healthy fats.
+For personalized nutrition planning, consider talking to a registered dietitian. I can help with general guidance and motivation!`;
+  }
+  if (message.toLowerCase().includes("form") || message.toLowerCase().includes("technique") || message.toLowerCase().includes("how to")) {
+    return `🏋️ Form is everything! Proper technique prevents injury and maximizes results.
+For specific form cues on an exercise, tell me which exercise you're working on and I'll give you a breakdown of setup, movement pattern, common mistakes, and cues to focus on.
+When in doubt: start lighter than you think you need to, move slowly, and prioritize control over weight.`;
+  }
+  return `💪 Great question${userContext}! Here's my take:
+\"${message.slice(0, 120)}\"
+
+My general advice: stay consistent, listen to your body, and focus on progressive improvement over time. What's your current situation with this? I can tailor my answer if you share more details about your goals, experience level, and any limitations.`;
+}
+
+function sandboxRecoveryAssessed(input: RecoveryInput): string {
+  const score = computeRecoveryScore(input);
+  let recommendation: string;
+  if (score >= 75) recommendation = "train_normal — You're well-recovered. Go ahead with your planned workout.";
+  else if (score >= 50) recommendation = "reduce_volume — You're somewhat recovered. Consider reducing volume by 20-30% or focusing on technique work.";
+  else if (score >= 25) recommendation = "reduce_intensity — Recovery is low. Skip heavy loads today; do light mobility or active recovery instead.";
+  else recommendation = "rest — Your body needs rest. Take a recovery day — light walking or stretching only.";
   
-  if (type === "opportunity") {
-    return `### 📊 Simulated Opportunity Analysis for "${prompt}"
-*Generated by the PolyVerses Opportunity Planning Agent v3.1*
+  return `📊 Recovery Assessment (sandbox mode): ${score}/100
+Recommendation: ${recommendation}
+Factors: sleep quality, recent workout frequency, self-reported energy, pain notes
+Note: Connect wearable data + GEMINI_API_KEY for real recovery analysis powered by your actual data.`;
+}
 
-The RICE scoring framework has been applied to evaluate the potential impact of integrating **${prompt}** into **${brand}**.
+function sandboxFormCue(exerciseName: string): string {
+  return `🏋️ Form Cue for ${exerciseName} (sandbox mode):
+Setup: Stand with feet shoulder-width apart, core engaged, neutral spine.
+Movement: Control the weight through the full range of motion. Don't rush the eccentric (lowering) phase — 2-3 seconds down, explosive but controlled up.
+Common mistakes: [Varies by exercise — connect GEMINI_API_KEY for specific form analysis]
+Focus cue: \"Move with intention, not momentum.\"
+Note: For exercise-specific form video analysis, this feature is planned for Phase 3 (computer vision integration).`;
+}
 
-| Feature Scope | Reach (Monthly) | Impact (Scale 1-3) | Confidence (%) | Effort (Person-Mo) | RICE Score |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Unified Integration Engine** | 120,000 | 2.5 (High) | 85% | 3.0 | **85,000** |
-| **Real-time Slack Notification Rail** | 80,000 | 2.0 (Medium)| 90% | 1.5 | **96,000** |
-| **Visual Node Flow Manager** | 50,000 | 1.5 (Medium)| 80% | 2.0 | **30,000** |
+function sandboxNutritionGuidance(profile: FitnessProfile | null, query: string): string {
+  const goalContext = profile?.goal === "build_muscle" ? "muscle building" : profile?.goal === "lose_weight" ? "fat loss" : "general fitness";
+  return `🥗 Nutrition Guidance for ${goalContext} (sandbox mode):
+Based on your goal of ${goalContext}:
 
-#### 💡 Agent Observations & Strategic Recommendations:
-1. **Prioritize Real-time Slack Rails first**: The incredibly low effort (1.5 person-months) relative to a high reach yields a superior RICE efficiency index.
-2. **Commit Unified Engine to Next Sprint**: Scale requirements suggest a high reach. PM approval is recommended before deployment.
-3. **Execution Routing**: Run via **GPT-4o Reasoning API** to analyze complex configuration models before shipping.`;
-  }
+• Protein: Prioritize lean sources (chicken, fish, eggs, tofu, legumes) — aim for a protein source at every meal.
+• Carbs: Focus on complex carbs (oats, quinoa, sweet potatoes, whole grains) — time them around workouts for energy.
+• Fats: Include healthy fats (avocado, nuts, olive oil) — essential for hormone health and satiety.
+• Hydration: 2-3 liters of water daily, more if training hard or in hot conditions.
+• Timing: Eat a balanced meal 2-3 hours before training, and include protein + carbs within 1-2 hours after.
 
-  if (type === "compliance") {
-    return `### 🛡️ Compliance & Safety Audit Report for "${prompt}"
-*Generated by the Compliance & GDPR Audit Agent v3.1*
+⚠️ Disclaimer: I'm an AI fitness coach, not a registered dietitian. For personalized meal plans, medical conditions, or specific dietary needs, consult a qualified nutrition professional.
 
-The system has audited data transaction maps for **${prompt}** within **${brand}**'s core EKS deployment.
+Note: Connect GEMINI_API_KEY for real AI-powered nutrition guidance tailored to your profile.`;
+}
 
-#### 🟢 Strengths Identified:
-- Explicit data structures enforce regional isolation (Active US-East-1 db tables and warm passive replication to EU-West-1 are distinct).
-- AES-256 state ledger configurations prevent unauthorized read/writes.
-
-#### ⚠️ compliance Warnings & Vulnerabilities:
-1. **GDPR Account Erasure Risk**: The architecture lacks a declared pipeline to remove historical log streams in Redis within the 30-day CCPA/GDPR erasure requirement window.
-2. **Vague Data Masking Constraints**: The API payload contains elements where plain corporate credentials or slack tokens may accidentally trace to Prometheus performance telemetry logs.
-
-#### 🔧 Actionable Remediation Steps:
-1. **Configure Neo4j Eviction Jobs**: Establish a cron script to run every 24 hours to scrub node relationships associated with deleted users.
-2. **Apply SHA-256 Hashing**: Mask all slack tokens on the client edge prior to EKS queue admission.
-3. **Authorize Legal Exceptions**: Ensure only the **CPO (Chief Product Officer)** role can bypass or override compliance warnings.`;
-  }
-
-  if (type === "prd") {
-    return `# 📄 Product Requirements Document: ${prompt}
-## PolyVerses v3.1 Enterprise Standard Document
-
-**Target Model Allocated**: GPT-4o  
-**Assigned Owner**: ${role} (Enforced via RBAC)  
-**Priority Classification**: ${priority} Queue Target  
-
----
-
-## 1. Executive Intent & Goals
-The objective is to deploy a scalable **${prompt}** inside **${brand}** that increases product velocity, ensures flawless system compliance, and maintains active-passive failover state-safeguards.
-
-## 2. Dynamic Telemetry Success Targets
-- **User Activity Index**: Increase monthly user feature activation metrics by **> 14%** within the first 6 weeks of release.
-- **Latency Standard**: Ensure end-to-end API roundtrip delays remain **<= 180ms** under high concurrent thread cycles on the AWS EKS instance.
-- **Failover SLA**: Maintain flawless active-passive Route53 failover capability, recovering database states to warm standbys in **< 120 seconds**.
-
-## 3. Recommended Core Architecture Requirements
-- **Queue Layer**: Manage processing loads on Redis priority streams with separate lanes for High, Medium, and Low workloads.
-- **Context Engines**: Route unstructured context queries to Pinecone vector indices, mapping complex feature linkages in Neo4j graph nodes.
-- **Circuit Breakers**: Enforce automated fallback logic (3 retries, exponential backoff) with automatic alerts escalated to human-PMs on failure.
-
-## 4. Legal Compliance & Purging Rules
-- Enforce GDPR compliance routines checking data handling specifications to prevent plain PII outputs.
-- Retain detailed execution transaction audit logs safe for up to 10 years to adhere to standard enterprise compliance policies.`;
-  }
-
-  if (type === "rollback") {
-    return `### 📉 SRE Rollback Budget Telemetry Checklist
-*Deployment Health Analysis for ${prompt}*
-
-Our monitoring agents have analyzed live Kubernetes runtime performance telemetry:
-
-- **Deployment Image**: \`athenaos-orchestrator:${priority.toLowerCase()}-v3\`
-- **Pod Latency (p95)**: 145ms *(Target Budget: 800ms) - OK*
-- **Request Failure Rate**: 0.08% *(Max Safe Margin: 2.0%) - OK*
-- **Redis Lock Key Sync**: 100% synchronized in 4.2ms - *OK*
-- **Route53 Active Link**: US-East-1 Active (Primary)  
-
-**Status**: 🟢 **HEALTHY**. Standard performance metrics are well within the safe operational error budget margins. Automatic rollback trigger is idle. No action is required.`;
-  }
-
-  return `### 🧠 PolyVerses v3.1 Synthesized Executive Insight
-*For concept: "${prompt}"*
-
-Our product agent network has evaluated the initial parameters for **${prompt}**:
-- **Active User Role Account**: ${role} authorization verified.
-- **Routing Lane Allocated**: Priority stream **${priority}** (Redis Stream worker allocated).
-- **Core Recommendation**: Start with **Opportunity Prioritization Scopes** and perform compliance scrubbing immediately.
-- **Multi-region Synchronization Link**: Global datastore active. Passive standby stands by in eu-west-1.`;
 }
 
 startServer();
