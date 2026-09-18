@@ -477,7 +477,7 @@ export interface Workout {
   workoutName: string;
   focus: string;
   duration: number;
-  exercises: ExerciseInput[];
+  exercises: WorkoutExercise[];
 }
 
 export interface DailyWorkout {

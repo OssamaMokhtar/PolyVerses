@@ -15,6 +15,8 @@ export interface Exercise {
   substitutions: string[];       // exercise IDs that can substitute for this one
   videoRef?: string;             // URL or identifier for form reference
   genderNeutral: boolean;        // true = suitable for all; false = notes apply
+  reps?: string;
+  restSeconds?: number;
 }
 
 export const EXERCISE_LIBRARY: Exercise[] = [
