@@ -1,0 +1,47 @@
+# PolyVerses — Development Environment (Docker Compose)
+# Run the full stack locally: Express API server + Vite dev server
+# ──────────────────────────────────────────────────────────────────────────────
+# Node.js v20.18.1 (current LTS at time of build)
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: polysync-api
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - HOST=0.0.0.0
+      # Gemini API key — set via .env or docker-compose override
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # Firebase configuration (optional)
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-}
+      - FIREBASE_API_KEY=${FIREBASE_API_KEY:-}
+      - FIREBASE_APP_ID=${FIREBASE_APP_ID:-}
+      - FIREBASE_MEASUREMENT_ID=${FIREBASE_MEASUREMENT_ID:-}
+    volumes:
+      # Mount source for live reload during development
+      - ./src:/app/src
+      - ./server.ts:/app/server.ts
+      - ./package.json:/app/package.json
+      - ./fitness.json:/app/fitness.json
+      - ./node_modules:/app/node_modules
+      - ./dist:/app/dist
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - polysync-net
+
+networks:
+  polysync-net:
+    driver: bridge

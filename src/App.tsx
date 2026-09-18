@@ -1,23 +1,26 @@
 import { useState, useEffect } from 'react';
 import { FitnessOnboarding } from './components/FitnessOnboarding';
+import { ThinkSurface } from './components/ThinkSurface';
+import { ObservabilityDashboard } from './components/ObservabilityDashboard';
 import { 
   Target, Dumbbell, Activity, Heart, Clock, BarChart3, Users, Zap, 
   ChevronUp, ChevronDown, Pause, Play, Plus, Minus, Clock as ClockIcon,
-  Sparkles, Check, AlertTriangle, Settings, LogOut
+  Sparkles, Check, AlertTriangle, Settings, LogOut, Brain
 } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { FitnessProfile, WeeklyPlan, WorkoutLogEntry } from './types';
-import { ExerciseLibrary } from './ExerciseLibrary';
+import { EXERCISE_LIBRARY } from './ExerciseLibrary';
 
 type FitnessTab = 'today' | 'weekly' | 'progress' | 'coach' | 'settings';
+type PmTab = 'think' | 'observe';
 
 export default function App() {
   const [onboarded, setOnboarded] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<FitnessTab>('today');
+  const [activeTab, setActiveTab] = useState<FitnessTab | PmTab>('today');
   const [profile, setProfile] = useState<FitnessProfile | null>(null);
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [todayWorkout, setTodayWorkout] = useState<{ day: any; workout: any } | null>(null);
@@ -141,7 +144,7 @@ export default function App() {
         focus: todayWorkout.workout.focus,
         exercises: Object.entries(exerciseLogs).map(([exId, sets]) => ({
           exerciseId: exId,
-          name: ExerciseLibrary.getExercise(parseInt(exId))?.name || exId,
+          name: EXERCISE_LIBRARY[parseInt(exId)]?.name || exId,
           category: '',
           primaryMuscles: [],
           prescribedSets: sets.length,
@@ -179,12 +182,14 @@ export default function App() {
     }
   };
 
-  const tabs: { id: FitnessTab; icon: any; label: string }[] = [
+  const tabs: { id: FitnessTab | PmTab; icon: any; label: string }[] = [
     { id: 'today', icon: Activity, label: "Today's Workout" },
     { id: 'weekly', icon: Target, label: 'Weekly Plan' },
     { id: 'progress', icon: BarChart3, label: 'Progress' },
     { id: 'coach', icon: Sparkles, label: 'Coach Chat' },
     { id: 'settings', icon: Settings, label: 'Settings' },
+    { id: 'think', icon: Brain, label: 'PM Workbench' },
+    { id: 'observe', icon: Activity, label: 'Observability' },
   ];
 
   const renderToday = () => {
@@ -209,7 +214,7 @@ export default function App() {
     }
 
     const { day, workout } = todayWorkout;
-    const exercises = workout.exercises || ExerciseLibrary.getAllExercises().slice(0, 5).map((ex, i) => ({
+    const exercises = workout.exercises || EXERCISE_LIBRARY.slice(0, 5).map((ex, i) => ({
       exerciseId: i.toString(),
       name: ex.name,
       category: ex.category,
@@ -530,10 +535,10 @@ export default function App() {
         </div>
 
         <div className="mt-4 p-4 bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl text-xs text-[#71717A]">
-          <div className="font-medium text-[#E4E4E7] mb-2">About PolySync</div>
+          <div className="font-medium text-[#E4E4E7] mb-2">About PolyVerses</div>
           <div>
-            AI Fitness Coach Platform · Version 1.0<br>
-            Built with React + Firebase + Gemini AI<br>
+            PolyVerses PM Workbench · Version 1.0<br/>
+            Built with React + Firebase + Gemini AI<br/>
             <a href="https://github.com/OssamaMokhtar/PolyVerses" className="text-[#00A3FF] hover:underline" target="_blank" rel="noopener noreferrer">
               View on GitHub →
             </a>
@@ -560,7 +565,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0C0C0E] text-[#E4E4E7] flex flex-col items-center justify-center p-4 border-[10px] border-[#1A1A1E]">
         <Activity className="w-10 h-10 text-[#00A3FF] animate-spin mb-4" />
-        <span className="font-mono text-xs text-[#00A3FF] tracking-widest uppercase">Loading PolySync...</span>
+        <span className="font-mono text-xs text-[#00A3FF] tracking-widest uppercase">Loading PolyVerses...</span>
       </div>
     );
   }
@@ -582,9 +587,9 @@ export default function App() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-sm font-bold tracking-wider uppercase font-mono text-[#F4F4F5]">PolySync</h1>
+              <h1 className="text-sm font-bold tracking-wider uppercase font-mono text-[#F4F4F5]">PolyVerses</h1>
               <span className="text-[9px] font-bold font-mono text-[#00A3FF] px-1.5 py-0.5 bg-[#00A3FF]/10 border border-[#00A3FF]/30 rounded uppercase">
-                AI Fitness Coach
+                PM Workbench
               </span>
             </div>
             <div className="text-xs text-[#71717A] mt-0.5">
@@ -632,12 +637,13 @@ export default function App() {
         {activeTab === 'progress' && renderProgress()}
         {activeTab === 'coach' && renderCoachChat()}
         {activeTab === 'settings' && renderSettings()}
+        {activeTab === 'think' && <ThinkSurface className="p-4" />}
+        {activeTab === 'observe' && <ObservabilityDashboard className="p-4" />}
       </div>
 
       {/* Footer disclaimer */}
       <div className="mt-4 text-xs text-[#71717A] text-center border-t border-[#27272A] pt-3">
-        PolySync provides AI-generated fitness guidance. Always warm up properly and listen to your body.
-        Consult a healthcare professional for injuries or medical conditions.
+        PolyVerses provides AI-powered product management assistance. Always validate AI-generated recommendations against your product context and stakeholder input.
       </div>
     </div>
   );

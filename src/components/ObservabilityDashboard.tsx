@@ -1,328 +1,403 @@
+/**
+ * ObservabilityDashboard — PolyVerses PM Workbench Governance Panel
+ *
+ * Real-time budget tracking, circuit breaker status, agent run history,
+ * and decision gate activity for the PM workbench.
+ *
+ * API: GET /api/observability
+ */
+
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { 
-  BarChart4, Activity, DollarSign, Clock, LayoutGrid, Radio, Shield, 
-  CheckCircle2, AlertTriangle, RefreshCw, Heart, Dumbbell, HeartRate, 
-  Scale, ClockCheck, Users, Target, Award, TrendingUp, Calendar
+import {
+  Activity, Clock, Shield, RefreshCw, AlertTriangle,
+  Zap, Database, CheckCircle2, GitBranch
 } from 'lucide-react';
-import { D3Heatmap } from './D3Heatmap';
 
-export function ObservabilityDashboard() {
-  const [activeRegion, setActiveRegion] = useState<'us-east-1' | 'eu-west-1'>('us-east-1');
-  const [isFailingOver, setIsFailingOver] = useState(false);
-  const [failureHistory, setFailureHistory] = useState<string[]>([]);
-  
-  // PolySync Coaching Quality Metrics
-  const [metrics, setMetrics] = useState({
-    cpuPercent: 28.5,
-    latencyMs: 165.2,
-    apiCost: 0.058,
-    activeThreads: 5,
-    overrideRate: 12.3,
-    systemHealth: 99.7,
-    // PolySync-specific metrics
-    workoutsCompletedToday: 0,
-    weeklyActiveUsers: 0,
-    avgRecoveryScore: 0,
-    chatSessionsToday: 0,
-    planAdaptationsToday: 0
-  });
-  
-  // Jitter simulator
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setMetrics((prev) => {
-        const jitterCpu = Number((25 + Math.random() * 10).toFixed(1));
-        const jitterLatency = Number((150 + Math.random() * 40).toFixed(1));
-        const workoutsToday = Math.floor(Math.random() * 15);
-        const activeUsers = Math.floor(85 + Math.random() * 20);
-        const recoveryScore = Number((65 + Math.random() * 20).toFixed(1));
-        const chatSessions = Math.floor(Math.random() * 40);
-        const adaptations = Math.floor(Math.random() * 12);
-        return {
-          ...prev,
-          cpuPercent: jitterCpu,
-          latencyMs: jitterLatency,
-          apiCost: Number((prev.apiCost + (Math.random() * 0.002)).toFixed(5)),
-          workoutsCompletedToday: workoutsToday,
-          weeklyActiveUsers: activeUsers,
-          avgRecoveryScore: recoveryScore,
-          chatSessionsToday: chatSessions,
-          planAdaptationsToday: adaptations
-        };
-      });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+interface BudgetState {
+  sessionUsed: number;
+  sessionBudget: number;
+  sessionRemaining: number;
+  sessionPercentUsed: number;
+  weeklyUsed: number;
+  weeklyBudget: number;
+  weeklyRemaining: number;
+  weeklyPercentUsed: number;
+  circuitBreakerLevel: string;
+  perAgent: Record<string, { used: number; budget: number; percentUsed: number }>;
+}
 
-  const triggerManualFailover = () => {
-    if (isFailingOver) return;
-    setIsFailingOver(true);
-    const destination = activeRegion === 'us-east-1' ? 'eu-west-1' : 'us-east-1';
-    
-    setTimeout(() => {
-      setActiveRegion(destination);
-      setIsFailingOver(false);
-      setFailureHistory((prev) => [
-        `[${new Date().toLocaleTimeString()}] Route53 record flipped: Dynamic registers shifted to ${destination}`,
-        ...prev
-      ]);
-    }, 1500);
-  };
+interface AgentRun {
+  id: string;
+  agentId: string;
+  modelTier: string;
+  inputTokens: number;
+  outputTokens: number;
+  intent: string;
+  outcome: string;
+  decisionGateTriggered: boolean;
+  timestamp: string;
+}
+
+interface Stats {
+  totalRuns: number;
+  totalTokensUsed: number;
+  averageTokensPerRun: number;
+  decisionGateRate: number;
+}
+
+interface ObservabilityDashboardProps {
+  className?: string;
+}
+
+type ViewMode = 'budget' | 'runs' | 'gates';
+
+function StatItem({ label, value, highlight, color }: { label: string; value: string | number; highlight?: boolean; color?: string }) {
+  return (
+    <div className="text-center">
+      <div className={highlight ? (color || 'text-[#F59E0B]') : 'text-[#00A3FF]'} className="text-lg font-bold">
+        {value}
+      </div>
+      <div className="text-xs text-[#71717A]">{label}</div>
+    </div>
+  );
+}
+
+function BudgetCard({ icon: Icon, title, subtitle, used, total, remaining, percentUsed, lowThreshold, midThreshold }: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  subtitle: string;
+  used: number;
+  total: number;
+  remaining: number;
+  percentUsed: number;
+  lowThreshold: number;
+  midThreshold: number;
+}) {
+  const barColor = percentUsed > 80 ? 'bg-[#EF4444]' : percentUsed > 50 ? 'bg-[#F59E0B]' : 'bg-[#00A3FF]';
+  const ring = percentUsed > 80 ? 'ring-1 ring-red-500/30' : '';
+  const remainingColor = remaining < lowThreshold ? 'text-[#EF4444]' : 'text-[#A1A1AA]';
 
   return (
-    <div className="space-y-8">
-      {/* PolySync Dashboard Header */}
-      <div className="bg-gradient-to-br from-[#16161A] to-[#0F0F12] border border-[#27272A] rounded-2xl p-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-[#00A3FF]/5 blur-3xl pointer-events-none" />
-        <span className="text-[10px] font-mono tracking-wider text-[#00A3FF] bg-[#00A3FF]/10 px-2 py-0.5 border border-[#00A3FF]/25 rounded uppercase font-medium">PolySync Fitness Coaching</span>
-        <h3 className="text-xl font-sans font-bold tracking-tight mt-2 text-[#F4F4F5]">Coaching Quality & User Engagement Dashboard</h3>
-        <p className="text-xs text-[#A1A1AA] mt-1 max-w-xl leading-relaxed">
-          Real-time metrics for AI coaching quality, workout completion rates, recovery score distribution, and user retention funnel.
-        </p>
+    <div className="p-4 bg-[#121215]/80 border border-[#27272A] rounded-xl">
+      <div className="flex items-center gap-2 mb-3">
+        <Icon className="w-4 h-4 text-[#00A3FF]" />
+        <h3 className="text-sm font-semibold text-[#E4E4E7]">{title}</h3>
+        <span className="text-xs text-[#71717A]">{subtitle}</span>
       </div>
-
-      {/* Active Failover Control Board */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 blur-3xl pointer-events-none" />
-        
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <span className="text-xs font-mono tracking-wider text-cyan-400 uppercase font-medium">Route53 Active-Passive Multi-Region failover</span>
-            <h3 className="text-xl font-sans font-medium text-slate-200 mt-0.5">Global Cluster Failover Management</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-xl leading-relaxed">
-              PolySync tracks DNS health metrics on a 10s interval. Breaches trigger emergency traffic flow routing using weighted DNS values in &lt;120 seconds.
-            </p>
-          </div>
-
-          <button
-            onClick={triggerManualFailover}
-            disabled={isFailingOver}
-            className="px-5 py-3 h-11 bg-slate-850 hover:bg-slate-800 hover:text-cyan-400 border border-slate-700/80 rounded-xl text-xs font-mono font-bold tracking-wider transition uppercase flex items-center justify-center space-x-2 shrink-0 cursor-pointer"
-          >
-            {isFailingOver ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
-                <span>Redirecting Traffic...</span>
-              </>
-            ) : (
-              <>
-                <Radio className="w-4 h-4 animate-pulse text-rose-500 shrink-0" />
-                <span>Trigger Manual Failover</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-          <div className={`p-4 rounded-xl border transition duration-300 ${
-            activeRegion === 'us-east-1' 
-              ? 'bg-cyan-950/10 border-cyan-500/40 ring-1 ring-cyan-500/20' 
-              : 'bg-slate-950/20 border-slate-850 opacity-60'
-          }`}>
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center space-x-2">
-                <Shield className="w-4 h-4 text-cyan-400" />
-                <span className="font-semibold text-xs font-mono text-slate-300">US-EAST-1 (Primary)</span>
-              </div>
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
-                activeRegion === 'us-east-1' ? 'bg-cyan-500/15 text-cyan-400 font-bold' : 'bg-slate-800 text-slate-500'
-              }`}>
-                {activeRegion === 'us-east-1' ? 'ACTIVE LEADER' : 'PASSIVE STANDBY'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-450 mt-2 leading-relaxed">Runs master coaching API, Gemini integrations, and is targeted by AWS ELB routers.</p>
-          </div>
-
-          <div className={`p-4 rounded-xl border transition duration-300 ${
-            activeRegion === 'eu-west-1' 
-              ? 'bg-cyan-950/10 border-cyan-500/40 ring-1 ring-cyan-500/20' 
-              : 'bg-slate-950/20 border-slate-850 opacity-60'
-          }`}>
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center space-x-2">
-                <Radio className="w-4 h-4 text-emerald-400" />
-                <span className="font-semibold text-xs font-mono text-slate-300">EU-WEST-1 (Standby)</span>
-              </div>
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
-                activeRegion === 'eu-west-1' ? 'bg-cyan-500/15 text-cyan-400 font-bold' : 'bg-slate-800 text-slate-500'
-              }`}>
-                {activeRegion === 'eu-west-1' ? 'ACTIVE LEADER' : 'PASSIVE STANDBY'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-450 mt-2 leading-relaxed">Houses cross-region database replication streams with RPO &lt;5 seconds. Ready for hot-takeover.</p>
-          </div>
-        </div>
-
-        {failureHistory.length > 0 && (
-          <div className="mt-4 p-3 bg-slate-950/60 border border-slate-850 rounded-xl space-y-1 overflow-x-hidden">
-            <span className="text-[10px] font-mono text-slate-500 tracking-wider uppercase block font-semibold">Route53 DNS ledger</span>
-            {failureHistory.map((h, i) => (
-              <div key={i} className="text-xs font-mono text-slate-400 leading-relaxed truncate">{h}</div>
-            ))}
-          </div>
-        )}
+      <div className={`h-3 bg-[#1A1A1E] rounded-full overflow-hidden mb-2 ${ring}`}>
+        <div className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+          style={{ width: `${Math.min(100, percentUsed)}%` }} />
       </div>
-
-      {/* D3-based Agent Telemetry Heatmap */}
-      <D3Heatmap />
-
-      {/* PolySync Coaching Quality Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        
-        {/* Workouts Completed Today */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <Dumbbell className="w-5 h-5 text-emerald-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_workouts_today</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.workoutsCompletedToday}</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Workouts completed by all users in the last 24 hours.</p>
-        </div>
-
-        {/* Weekly Active Users */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <Users className="w-5 h-5 text-cyan-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_active_users_7d</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.weeklyActiveUsers}</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Users who have logged at least 1 workout in the last 7 days.</p>
-        </div>
-
-        {/* Average Recovery Score */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <HeartRate className="w-5 h-5 text-amber-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_avg_recovery_score</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.avgRecoveryScore}</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Average recovery score (0-100) across all users with wearable data.</p>
-        </div>
-
-        {/* Chat Sessions Today */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <Chat className="w-5 h-5 text-purple-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_chat_sessions_today</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.chatSessionsToday}</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Conversational coaching sessions initiated in the last 24 hours.</p>
-        </div>
-
-        {/* Plan Adaptations Today */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <RefreshCw className="w-5 h-5 text-amber-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_plan_adaptations_today</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.planAdaptationsToday}</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Weekly workout plans adapted based on completion and recovery data.</p>
-        </div>
-
-        {/* Dynamic Spend */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <DollarSign className="w-5 h-5 text-emerald-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_llm_cost_usd</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">${metrics.apiCost.toFixed(4)}</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Total spent on Gemini API calls during this live session.</p>
-        </div>
-
-        {/* Latency Index */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <Clock className="w-5 h-5 text-cyan-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_api_latency_ms</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.latencyMs}ms</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">p95 API response duration times across internal agent loops.</p>
-        </div>
-
-        {/* Human Override rate */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <Activity className="w-5 h-5 text-amber-500" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_gate_override_rate</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.overrideRate}%</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Average percentage of workflow decisions modified by human authorization steps.</p>
-        </div>
-
-        {/* Server utilization */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <BarChart4 className="w-5 h-5 text-indigo-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_cpu_load</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.cpuPercent}%</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Active CPU threads utilization across container pods.</p>
-        </div>
-
-        {/* Active threads */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <LayoutGrid className="w-5 h-5 text-pink-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_active_agents</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.activeThreads}</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Currently active agent threads in the Redis Streams buffer queue.</p>
-        </div>
-
-        {/* System Health */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-          <div className="flex justify-between items-start w-full">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-            <span className="text-[10px] font-mono text-slate-500">polysync_system_health</span>
-          </div>
-          <span className="block text-3xl font-sans font-medium text-slate-100 mt-4">{metrics.systemHealth}%</span>
-          <p className="text-xs text-slate-450 mt-1.5 leading-relaxed">Comprehensive health rating computed against SLA bounds.</p>
-        </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-[#A1A1AA]">Used</span>
+        <span className="text-[#E4E4E7] font-mono font-medium">{formatTokens(used)} / {formatTokens(total)}</span>
       </div>
-
-      {/* PolySync Quick Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-br from-[#16161A] to-[#0F0F12] border border-[#27272A] rounded-xl p-4 flex items-center space-x-3">
-          <div className="p-2 bg-[#10B981]/10 text-[#10B981] rounded-lg">
-            <Target className="w-4 h-4" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono text-[#71717A] uppercase">Today's Workouts</span>
-            <p className="text-lg font-sans font-bold text-[#F4F4F5]">{metrics.workoutsCompletedToday}</p>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-[#16161A] to-[#0F0F12] border border-[#27272A] rounded-xl p-4 flex items-center space-x-3">
-          <div className="p-2 bg-[#00A3FF]/10 text-[#60C5FF] rounded-lg">
-            <Users className="w-4 h-4" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono text-[#71717A] uppercase">Active This Week</span>
-            <p className="text-lg font-sans font-bold text-[#F4F4F5]">{metrics.weeklyActiveUsers}</p>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-[#16161A] to-[#0F0F12] border border-[#27272A] rounded-xl p-4 flex items-center space-x-3">
-          <div className="p-2 bg-[#F59E0B]/10 text-[#F59E0B] rounded-lg">
-            <HeartRate className="w-4 h-4" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono text-[#71717A] uppercase">Avg Recovery</span>
-            <p className="text-lg font-sans font-bold text-[#F4F4F5]">{metrics.avgRecoveryScore}</p>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-[#16161A] to-[#0F0F12] border border-[#27272A] rounded-xl p-4 flex items-center space-x-3">
-          <div className="p-2 bg-[#8B5CF6]/10 text-[#A78BFA] rounded-lg">
-            <Chat className="w-4 h-4" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono text-[#71717A] uppercase">Chat Sessions</span>
-            <p className="text-lg font-sans font-bold text-[#F4F4F5]">{metrics.chatSessionsToday}</p>
-          </div>
-        </div>
+      <div className="flex items-center justify-between text-xs mt-1">
+        <span className="text-[#71717A]">Remaining</span>
+        <span className={`font-mono ${remainingColor}`}>
+          {formatTokens(remaining)} tokens
+        </span>
       </div>
     </div>
   );
 }
 
-// Chat icon import
-import { Chat } from 'lucide-react';
+function formatTokens(n: number) {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return n.toString();
+}
+
+function formatDate(iso: string) {
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+export function ObservabilityDashboard({ className }: ObservabilityDashboardProps) {
+  const [budget, setBudget] = useState<BudgetState | null>(null);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('budget');
+  const [lastFetched, setLastFetched] = useState<Date | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/observability');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.data) {
+          setBudget(data.data.budget);
+          setRuns(data.data.runs || []);
+          setStats(data.data.stats);
+          setLastFetched(new Date());
+        }
+      }
+    } catch {}
+    finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [refreshCounter]);
+
+  const getBreakerColor = (level: string) => {
+    switch (level) {
+      case 'small': return 'text-[#F59E0B] bg-[#F59E0B]/10 border-[#F59E0B]/30';
+      case 'medium': return 'text-[#EF4444] bg-[#EF4444]/10 border-[#EF4444]/30';
+      case 'capable': return 'text-[#DC2626] bg-[#DC2626]/10 border-[#DC2626]/30';
+      default: return 'text-[#10B981] bg-[#10B981]/10 border-[#10B981]/30';
+    }
+  };
+
+  const getBreakerLabel = (level: string) => {
+    switch (level) {
+      case 'small': return 'Budget pressure — small agents constrained';
+      case 'medium': return 'Session budget near limit — pause synthesis agents';
+      case 'capable': return 'Critical — halt all agent invocations';
+      default: return 'Normal — all agents operational';
+    }
+  };
+
+  return (
+    <div className={className}>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-[#00A3FF]/10 rounded-lg">
+            <Activity className="w-5 h-5 text-[#00A3FF]" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-[#E4E4E7]">Observability Dashboard</h2>
+            <p className="text-xs text-[#71717A]">PolyVerses PM Workbench · Governance Layer S1</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {lastFetched && (
+            <span className="text-xs text-[#71717A] flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              {formatDate(lastFetched.toISOString())}
+            </span>
+          )}
+          <button
+            onClick={() => setRefreshCounter(c => c + 1)}
+            disabled={isLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-[#27272A] rounded-lg text-xs text-[#71717A] hover:text-[#A1A1AA] hover:bg-[#16161A] transition disabled:opacity-50"
+          >
+            {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="flex gap-1 mb-4 border-b border-[#27272A] pb-2">
+        {(['budget', 'runs', 'gates'] as ViewMode[]).map(mode => (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode)}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition capitalize ${viewMode === mode ? 'bg-[#00A3FF]/10 text-[#00A3FF] border-b-2 border-[#00A3FF]' : 'text-[#71717A] hover:text-[#A1A1AA]'}`}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+
+      {isLoading && (
+        <div className="flex items-center justify-center py-12">
+          <div className="flex items-center gap-3 text-[#71717A]">
+            <RefreshCw className="w-5 h-5 animate-spin" />
+            <span className="text-sm">Loading observability data...</span>
+          </div>
+        </div>
+      )}
+
+      {!isLoading && budget && (
+        <>
+          {viewMode === 'budget' && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-4"
+            >
+              <div className={`p-4 rounded-xl border ${budget.circuitBreakerLevel !== 'none' ? 'border-red-500/30 bg-red-500/5' : 'border-[#27272A] bg-[#121215]/80'}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    {budget.circuitBreakerLevel !== 'none' ? (
+                      <AlertTriangle className="w-5 h-5 text-red-400" />
+                    ) : (
+                      <Shield className="w-5 h-5 text-[#10B981]" />
+                    )}
+                    <span className="text-sm font-semibold text-[#E4E4E7]">Circuit Breaker</span>
+                  </div>
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${getBreakerColor(budget.circuitBreakerLevel)}`}>
+                    {budget.circuitBreakerLevel.toUpperCase()}
+                  </span>
+                </div>
+                <p className="text-sm text-[#A1A1AA]">{getBreakerLabel(budget.circuitBreakerLevel)}</p>
+              </div>
+
+              <BudgetCard
+                icon={Zap}
+                title="Session Budget"
+                subtitle="100K tokens"
+                used={budget.sessionUsed}
+                total={budget.sessionBudget}
+                remaining={budget.sessionRemaining}
+                percentUsed={budget.sessionPercentUsed}
+                lowThreshold={10000}
+                midThreshold={50000}
+              />
+
+              <BudgetCard
+                icon={Clock}
+                title="Weekly Budget"
+                subtitle="500K tokens / week"
+                used={budget.weeklyUsed}
+                total={budget.weeklyBudget}
+                remaining={budget.weeklyRemaining}
+                percentUsed={budget.weeklyPercentUsed}
+                lowThreshold={50000}
+                midThreshold={250000}
+              />
+
+              <div className="p-4 bg-[#121215]/80 border border-[#27272A] rounded-xl">
+                <div className="flex items-center gap-2 mb-3">
+                  <GitBranch className="w-4 h-4 text-[#00A3FF]" />
+                  <h3 className="text-sm font-semibold text-[#E4E4E7]">Per-Agent Budget Usage</h3>
+                </div>
+                <div className="space-y-2">
+                  {Object.entries(budget.perAgent).map(([agentId, u]) => (
+                    <div key={agentId} className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-[#A1A1AA] w-10 shrink-0">{agentId}</span>
+                      <div className={`flex-1 h-2 bg-[#1A1A1E] rounded-full overflow-hidden ${u.percentUsed > 80 ? 'ring-1 ring-red-500/30' : ''}`}>
+                        <div className={`h-full rounded-full transition-all duration-500 ${u.percentUsed > 80 ? 'bg-[#EF4444]' : u.percentUsed > 50 ? 'bg-[#F59E0B]' : 'bg-[#00A3FF]'}`}
+                          style={{ width: `${Math.min(100, u.percentUsed)}%` }} />
+                      </div>
+                      <span className="text-xs text-[#71717A] font-mono w-16 text-right shrink-0">
+                        {u.used.toFixed(0)}/{u.budget.toFixed(0)} ({u.percentUsed.toFixed(0)}%)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {viewMode === 'runs' && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-3"
+            >
+              <div className="p-4 bg-[#121215]/80 border border-[#27272A] rounded-xl">
+                <div className="flex items-center gap-2 mb-3">
+                  <Database className="w-4 h-4 text-[#00A3FF]" />
+                  <h3 className="text-sm font-semibold text-[#E4E4E7]">Recent Agent Runs</h3>
+                  <span className="text-xs text-[#71717A]">{runs.length} total</span>
+                </div>
+                {stats && (
+                  <div className="grid grid-cols-3 gap-3 mb-4 p-3 bg-[#0C0C0E] rounded-lg">
+                    <StatItem label="Total runs" value={stats.totalRuns} />
+                    <StatItem label="Tokens used" value={formatTokens(stats.totalTokensUsed)} />
+                    <StatItem label="Avg / run" value={stats.averageTokensPerRun.toFixed(0)} />
+                  </div>
+                )}
+                <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                  {runs.length === 0 ? (
+                    <div className="text-center py-6 text-[#71717A] text-sm">
+                      <Activity className="w-6 h-6 mx-auto mb-2 text-[#27272A]" />
+                      <p>No runs recorded yet.</p>
+                    </div>
+                  ) : (
+                    runs.map((run) => (
+                      <div key={run.id} className="p-3 bg-[#121215]/60 border border-[#27272A] rounded-lg hover:bg-[#121215]/90 transition">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded bg-[#00A3FF]/10 flex items-center justify-center text-[#00A3FF] text-xs font-bold">
+                              {run.agentId}
+                            </div>
+                            <span className="text-sm font-medium text-[#E4E4E7]">{run.agentId}</span>
+                            <span className="text-xs text-[#71717A]">· {run.modelTier}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-[#71717A]">{formatDate(run.timestamp)}</span>
+                            {run.decisionGateTriggered && (
+                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-[#F59E0B]/10 border border-[#F59E0B]/30 rounded text-[#F59E0B]">
+                                <Shield className="w-3 h-3" />
+                                Gate
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-[#71717A]">
+                          <span>Intent: {run.intent}</span>
+                          <span>In: {formatTokens(run.inputTokens)}</span>
+                          <span>Out: {formatTokens(run.outputTokens)}</span>
+                          <span className="truncate max-w-[300px]">{run.outcome.slice(0, 60)}...</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {viewMode === 'gates' && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-3"
+            >
+              <div className="p-4 bg-[#121215]/80 border border-[#27272A] rounded-xl">
+                <div className="flex items-center gap-2 mb-3">
+                  <Shield className="w-4 h-4 text-[#00A3FF]" />
+                  <h3 className="text-sm font-semibold text-[#E4E4E7]">Decision Gate Activity</h3>
+                  {stats && (
+                    <span className="text-xs text-[#71717A]">
+                      Gate rate: {(stats.decisionGateRate * 100).toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+                {stats && (
+                  <div className="grid grid-cols-2 gap-3 mb-4 p-3 bg-[#0C0C0E] rounded-lg">
+                    <StatItem label="Gate rate" value={(stats.decisionGateRate * 100).toFixed(1) + '%'} highlight color="text-[#F59E0B]" />
+                    <StatItem label="Total runs" value={stats.totalRuns} />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {runs.filter(r => r.decisionGateTriggered).length === 0 ? (
+                    <div className="text-center py-6 text-[#71717A] text-sm">
+                      <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-[#10B981]" />
+                      <p>No decision gates triggered yet.</p>
+                      <p className="text-xs mt-1">Gates fire when an agent's response requires human approval before action.</p>
+                    </div>
+                  ) : (
+                    runs.filter(r => r.decisionGateTriggered).map((run) => (
+                      <div key={run.id} className="p-3 bg-[#F59E0B]/5 border border-[#F59E0B]/20 rounded-lg">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <Shield className="w-4 h-4 text-[#F59E0B]" />
+                            <span className="text-sm font-medium text-[#E4E4E7]">{run.agentId}</span>
+                          </div>
+                          <span className="text-xs text-[#71717A]">{formatDate(run.timestamp)}</span>
+                        </div>
+                        <p className="text-xs text-[#A1A1AA] truncate">{run.outcome.slice(0, 120)}...</p>
+                        <div className="mt-2 flex items-center gap-3 text-xs text-[#71717A]">
+                          <span>Intent: {run.intent}</span>
+                          <span>Tokens: {formatTokens(run.inputTokens + run.outputTokens)}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

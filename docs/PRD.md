@@ -1,14 +1,16 @@
 # PolyVerses — Product Requirements Document
 
-## PolyVerses AI Fitness Coach Platform
+## PolyVerses AI Product Management Workbench
 
 **Version:** 1.1  
-**Status:** Draft — Phase 0 foundation complete + server API in progress (6/16 endpoints built); Phase 1 core coaching loop not yet started  
-**Date:** September 12, 2026  
-**Product:** AI Fitness Coach  
-**Target Launch:** Phase 1 MVP (core coaching loop) in 4-6 weeks
+**Status:** Draft — Phase 0 foundation complete; Phase 1 agent runtime (F00–F11) in progress  
+**Date:** September 17, 2026  
+**Product:** AI Product Management Workbench (PM Workbench)  
+**Target Launch:** Phase 1 MVP (12-agent orchestration mesh) in 4-6 weeks
 
----
+PolyVerses is an **AI-native product management workbench** that uses a 12-agent specialist orchestration mesh (F00–F11) to assist product leaders with requirements drafting, technical design, release planning, sprint management, discovery research, risk analysis, metrics definition, prioritization (RICE), change communications, and knowledge curation. Each decision is traced to the specific agent that produced it, with full observability into token budgets, circuit breaker state, and human gate activity.
+
+**Note on repo scope:** This repository (`OssamaMokhtar/PolyVerses`) contains **PolyVerses** — the PM workbench described in this document. The fitness coaching product **PolySync** is a separate product built on a different codebase. This PRD covers PolyVerses only.
 
 ## 1. Executive Summary
 
