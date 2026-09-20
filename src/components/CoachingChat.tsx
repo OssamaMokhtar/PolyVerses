@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface CoachChatProps {
   profile: FitnessProfile | null;
@@ -92,7 +92,7 @@ export function CoachChat({ profile, recentWorkouts, currentPlan, onSendMessage,
 
     try {
       const response = await onSendMessage(userMessage);
-      setMessages(prev => [...prev, { role: 'coach', text: response.response, timestamp: response.timestamp }]);
+      setMessages(prev => [...prev, { role: 'coach', text: response.reply, timestamp: new Date().toISOString() }]);
     } catch (err) {
       setMessages(prev => [...prev, {
         role: 'coach',

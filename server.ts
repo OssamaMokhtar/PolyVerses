@@ -601,7 +601,7 @@ async function startServer() {
         } as any);
       }
 
-      res.json({ response: responseText, sandbox: !ai });
+      res.json({ response: responseText, timestamp: new Date().toISOString(), sandbox: !ai });
     } catch (err) {
       console.error("F06 chat error:", err);
       res.status(500).json({ error: "Failed to process chat" });
@@ -695,6 +695,116 @@ async function startServer() {
     } catch (err) {
       console.error("F08 nutrition error:", err);
       res.status(500).json({ error: "Failed to get nutrition guidance" });
+    }
+  });
+
+  // F10 — Wearable Data Ingest Agent (HealthKit + Google Fit)
+  // Note: Web HealthKit access requires Safari 15+ on iOS 15+/macOS 11+.
+  // Google Fit requires OAuth 2.0 flow via Google Identity Services.
+  // Both are stubbed here; full implementations require native companion app
+  // or browser-specific APIs that are only available in secure contexts.
+
+  app.post("/api/fitness/wearable/ingest", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { source, data } = req.body as {
+        source: 'healthkit' | 'googlefit' | 'strava' | 'garmin' | 'whoop' | 'oura';
+        data: WearableDataPoint[];
+      };
+      if (!source || !data || !Array.isArray(data)) {
+        res.status(400).json({ error: "source and data array are required" });
+        return;
+      }
+
+      // Validate and normalize
+      const normalized: WearableDataPoint[] = data
+        .filter((d: any) => d.timestamp && typeof d.timestamp === 'number')
+        .map((d: any, i: number) => ({
+          id: d.id || crypto.randomUUID(),
+          userId: uid,
+          source,
+          timestamp: d.timestamp,
+          sleepDuration: d.sleepDuration,
+          sleepStartTime: d.sleepStartTime,
+          sleepEndTime: d.sleepEndTime,
+          sleepStages: d.sleepStages,
+          restingHeartRate: d.restingHeartRate,
+          hrv: d.hrv,
+          heartRateZones: d.heartRateZones,
+          steps: d.steps,
+          activeCalories: d.activeCalories,
+          activeMinutes: d.activeMinutes,
+          workoutSessions: d.workoutSessions,
+          createdAt: Date.now(),
+        }));
+
+      // Save to Firestore
+      const userWearableRef = doc(db, "users", uid, "wearableData", "points");
+      const existingSnap = await getDoc(userWearableRef);
+      const existingPoints: WearableDataPoint[] = existingSnap.exists() ? (existingSnap.data().points || []) : [];
+      const merged = [...existingPoints, ...normalized]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 500);
+      await setDoc(userWearableRef, { points: merged, updatedAt: Date.now() }, { merge: true });
+
+      // Update summary
+      const summaryRef = doc(db, "users", uid, "wearableData", "current");
+      await setDoc(summaryRef, {
+        source,
+        lastIngestedAt: Date.now(),
+        dataAgeHours: 0,
+        pointCount: merged.length,
+      } as any, { merge: true });
+
+      res.json({
+        success: true,
+        pointCount: normalized.length,
+        totalPoints: merged.length,
+        sandbox: true,
+      });
+    } catch (err) {
+      console.error("F10 wearable ingest error:", err);
+      res.status(500).json({ error: "Failed to ingest wearable data" });
+    }
+  });
+
+  app.get("/api/fitness/wearable", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const wearableRef = doc(db, "users", uid, "wearableData", "current");
+      const wearableSnap = await getDoc(wearableRef);
+      if (!wearableSnap.exists()) {
+        res.json({ connected: false, source: null, dataAgeHours: null, pointCount: 0 });
+        return;
+      }
+      const data = wearableSnap.data();
+      const pointsRef = doc(db, "users", uid, "wearableData", "points");
+      const pointsSnap = await getDoc(pointsRef);
+      const pointCount = pointsSnap.exists() ? (pointsSnap.data().points?.length || 0) : 0;
+      res.json({
+        connected: true,
+        source: data.source,
+        lastIngestedAt: data.lastIngestedAt,
+        dataAgeHours: data.dataAgeHours,
+        pointCount,
+      });
+    } catch (err) {
+      console.error("F10 wearable read error:", err);
+      res.status(500).json({ error: "Failed to read wearable status" });
+    }
+  });
+
+  app.post("/api/fitness/wearable/disconnect", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { source } = req.body as { source: string };
+      res.json({ success: true, disconnected: source });
+    } catch (err) {
+      console.error("F10 wearable disconnect error:", err);
+      res.status(500).json({ error: "Failed to disconnect wearable" });
     }
   });
 
