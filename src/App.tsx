@@ -12,6 +12,7 @@ import { FitnessProfile, WeeklyPlan, WorkoutLogEntry } from './types';
 import { EXERCISE_LIBRARY, EXERCISE_BY_ID } from './ExerciseLibrary';
 import { CoachChat } from './components/CoachingChat';
 import { RecoveryDashboard } from './components/RecoveryDashboard';
+import { CheckInForm } from './components/CheckInForm';
 
 type FitnessTab = 'today' | 'weekly' | 'progress' | 'coach' | 'settings';
 
@@ -28,6 +29,8 @@ export default function App() {
   const [currentSet, setCurrentSet] = useState<{ exerciseId: string; setNumber: number } | null>(null);
   const [exerciseLogs, setExerciseLogs] = useState<Record<string, any[]>>({});
   const [showCoachPanel, setShowCoachPanel] = useState(false);
+  const [showCheckIn, setShowCheckIn] = useState(false);
+  const [checkInWorkoutId, setCheckInWorkoutId] = useState<string | undefined>();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -164,10 +167,16 @@ export default function App() {
       const res = await fetch('/api/fitness/log-workout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.uid },
-        body: JSON.stringify(workoutData)
+        body: JSON.stringify(workoutData as any)
       });
       if (res.ok) {
-        alert('Workout logged! Your plan will adapt for next week.');
+        if (completed) {
+          // Show check-in form after completing workout
+          setCheckInWorkoutId(todayWorkout.workout.workoutName);
+          setShowCheckIn(true);
+        } else {
+          alert('Workout skipped. Your plan will adapt for next week.');
+        }
         setExerciseLogs({});
         setTodayWorkout(null);
         fetchPlan();
@@ -356,6 +365,20 @@ export default function App() {
           <AlertTriangle className="w-3.5 h-3.5" />
           AI-generated fitness guidance. Listen to your body and consult a professional for injuries.
         </div>
+
+        {/* Post-workout check-in */}
+        {showCheckIn && (
+          <div className="mt-4">
+            <CheckInForm
+              workoutId={checkInWorkoutId}
+              onComplete={() => {
+                setShowCheckIn(false);
+                setCheckInWorkoutId(undefined);
+                fetchPlan();
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   };
@@ -613,6 +636,55 @@ export default function App() {
               </div>
               <ChevronRight className="w-4 h-4 text-[#71717A]" />
             </button>
+
+            {/* Notification Settings Panel */}
+            <div className="mt-3 p-4 bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl animate-in fade-in zoom-in duration-200">
+              <h3 className="text-sm font-semibold mb-4">Notification Preferences</h3>
+
+              {/* Daily digest time */}
+              <div className="mb-4">
+                <label className="text-xs text-[#71717A] block mb-1">Daily digest delivery time</label>
+                <div className="flex items-center gap-2">
+                  {['06:00', '07:00', '08:00', '09:00', '10:00', '18:00', '19:00', '20:00'].map(time => (
+                    <button
+                      key={time}
+                      onClick={() => {/* TODO: save to /api/fitness/settings/notifications */}}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${time === '08:00' ? 'bg-[#00A3FF]/20 border-[#00A3FF]/40 text-[#00A3FF]' : 'bg-[#1A1A20] border-[#27272A] text-[#71717A] hover:border-[#3f3f46]'}`}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Toggles */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#E4E4E7]">Workout reminders</span>
+                  <div className="w-10 h-5 rounded-full bg-[#00A3FF] relative">
+                    <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 right-0.5 shadow-sm" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#E4E4E7]">Post-workout check-in prompt</span>
+                  <div className="w-10 h-5 rounded-full bg-[#00A3FF] relative">
+                    <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 right-0.5 shadow-sm" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#E4E4E7]">Recovery score notification</span>
+                  <div className="w-10 h-5 rounded-full bg-[#27272A] relative">
+                    <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 left-0.5 shadow-sm" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-[#27272A]">
+                <p className="text-xs text-[#71717A]">
+                  Push notifications require browser permission. Daily digest is sent via email or in-app.
+                </p>
+              </div>
+            </div>
 
             <button className="w-full flex items-center gap-3 p-3 rounded-lg border border-[#27272A] hover:bg-[#16161A] transition text-left">
               <AlertTriangle className="w-4 h-4 text-[#F59E0B]" />

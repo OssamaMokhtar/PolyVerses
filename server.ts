@@ -808,6 +808,128 @@ async function startServer() {
     }
   });
 
+  // 3.3 — Streaks & Consistency
+  app.get("/api/fitness/streaks", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const workoutsRef = collection(db, "users", uid, "workouts");
+      const workoutsSnap = await getDocs(workoutsRef);
+      const logs: any[] = [];
+      workoutsSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.completed) {
+          logs.push({ date: data.createdAt || data.date, workoutName: data.workoutName });
+        }
+      });
+
+      // Calculate streak
+      const workoutDates = [...new Set(logs.map(l => {
+        const d = new Date(l.date);
+        return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      }))].sort().reverse();
+
+      let streak = 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let checkDate = new Date(today);
+
+      for (const dateStr of workoutDates) {
+        const logDate = new Date(dateStr + 'T00:00:00');
+        const diffDays = Math.floor((today.getTime() - logDate.getTime()) / 86400000);
+        if (diffDays <= 1 && diffDays >= 0) {
+          streak++;
+          today.setDate(today.getDate() - 1);
+        } else if (diffDays > 1) {
+          break;
+        }
+      }
+
+      // Longest streak
+      let longestStreak = 0;
+      let currentStreak = 0;
+      const sortedDates = [...new Set(logs.map(l => {
+        const d = new Date(l.date);
+        return d.getTime();
+      }))].sort((a, b) => a - b);
+
+      for (let i = 0; i < sortedDates.length; i++) {
+        if (i === 0 || sortedDates[i] - sortedDates[i - 1] === 86400000) {
+          currentStreak++;
+        } else {
+          longestStreak = Math.max(longestStreak, currentStreak);
+          currentStreak = 1;
+        }
+      }
+      longestStreak = Math.max(longestStreak, currentStreak);
+
+      // Total workouts
+      const totalWorkouts = logs.length;
+      const last7Days = logs.filter(l => {
+        const d = new Date(l.date);
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 7);
+        return d >= cutoff;
+      }).length;
+
+      res.json({
+        streakDays: streak,
+        longestStreakDays: longestStreak,
+        totalWorkouts,
+        workoutsLast7Days: last7Days,
+        sandbox: true,
+      });
+    } catch (err) {
+      console.error("Streaks endpoint error:", err);
+      res.status(500).json({ error: "Failed to calculate streaks" });
+    }
+  });
+
+  // 3.4 — Notification preferences
+  app.post("/api/fitness/settings/notifications", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { dailyDigestTime, workoutReminders, checkInReminders } = req.body as {
+        dailyDigestTime?: string;
+        workoutReminders?: boolean;
+        checkInReminders?: boolean;
+      };
+      const settingsRef = doc(db, "users", uid, "settings", "notifications");
+      await setDoc(settingsRef, {
+        dailyDigestTime: dailyDigestTime || "08:00",
+        workoutReminders: workoutReminders !== false,
+        checkInReminders: checkInReminders !== false,
+        updatedAt: Date.now(),
+      } as any, { merge: true });
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Notification settings error:", err);
+      res.status(500).json({ error: "Failed to save notification settings" });
+    }
+  });
+
+  app.get("/api/fitness/settings/notifications", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const settingsRef = doc(db, "users", uid, "settings", "notifications");
+      const settingsSnap = await getDoc(settingsRef);
+      if (settingsSnap.exists()) {
+        res.json(settingsSnap.data());
+      } else {
+        res.json({
+          dailyDigestTime: "08:00",
+          workoutReminders: true,
+          checkInReminders: true,
+        });
+      }
+    } catch (err) {
+      console.error("Notification settings read error:", err);
+      res.status(500).json({ error: "Failed to read notification settings" });
+    }
+  });
+
   // F05 — Manual plan adaptation trigger
   app.post("/api/fitness/adapt-plan", async (req, res) => {
     const uid = requireAuth(req, res);
