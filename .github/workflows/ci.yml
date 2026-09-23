@@ -1,5 +1,9 @@
 name: CI
 
+# Every step is a gate. The previous workflow wrapped lint, build, test and
+# audit in `|| echo` / `|| true`, so it could not fail — while main carried
+# 206 type errors.
+
 on:
   push:
     branches: [main]
@@ -7,30 +11,30 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install
         run: npm ci
 
-      - name: Lint
-        run: npm run lint --if-present || echo 'No lint script'
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Build
-        run: npm run build --if-present || echo 'No build script'
+        run: npm run build
 
-      - name: Test
-        run: npm test --if-present || echo 'No test script'
+      - name: Client bundle carries no Gemini client or key
+        run: |
+          if grep -lE 'generativelanguage\.googleapis\.com|@google/genai|GoogleGenAI' dist/assets/*.js; then
+            echo "::error::client bundle references the Gemini API"; exit 1
+          fi
 
-      - name: Dependency audit
-        run: npm audit --omit=dev || true
+      - name: Dependency audit (high and critical fail the build)
+        run: npm audit --omit=dev --audit-level=high
