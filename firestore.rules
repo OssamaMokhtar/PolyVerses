@@ -2,12 +2,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 1. Global Safety Net — Default Deny Catch-All
+    // 1. Global Safety Net - Default Deny Catch-All
     match /{document=**} {
       allow read, write: if false;
     }
 
     // --- REUSABLE SECURITY PRIMITIVES & HELPERS ---
+    
     function isSignedIn() {
       return request.auth != null;
     }
@@ -21,7 +22,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\\\-]+$');
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -33,113 +34,24 @@ service cloud.firestore {
     }
 
     // --- VALIDATION BLUEPRINTS ---
-    function isValidProfile(data) {
+
+    function isValidUser(data) {
       return data.uid is string && data.uid.size() <= 128 &&
              data.email is string && data.email.size() <= 256 &&
-             data.goal is string && data.goal in ['strength', 'hypertrophy', 'endurance', 'weight_loss', 'general_fitness', 'sport_specific'] &&
-             data.fitnessLevel is string && data.fitnessLevel in ['beginner', 'intermediate', 'advanced'] &&
-             data.injuries is list &&
-             data.equipment is list &&
-             data.daysPerWeek is number && data.daysPerWeek >= 1 && data.daysPerWeek <= 7 &&
-             data.sessionDuration is number && data.sessionDuration >= 10 && data.sessionDuration <= 180 &&
-             data.healthDataConsent is bool &&
-             data.disclaimerAccepted is bool &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
-             (!('primaryFocus' in data) || (data.primaryFocus is string && data.primaryFocus.size() <= 500)) &&
-             (!('weight' in data) || (data.weight is number && data.weight > 20 && data.weight < 350)) &&
-             (!('height' in data) || (data.height is number && data.height > 50 && data.height < 280)) &&
-             (!('age' in data) || (data.age is number && data.age >= 13 && data.age <= 120)) &&
-             (!('gender' in data) || data.gender in ['male', 'female', 'other', 'prefer_not_to_say']) &&
+             (!('productConfig' in data) || (data.productConfig is map)) &&
              (!('createdAt' in data) || data.createdAt is timestamp) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
-    function isValidWorkoutLog(data) {
+    function isValidDocument(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.userId is string && data.userId.size() <= 128 &&
-             data.date is timestamp &&
-             data.planId is string && data.planId.size() <= 128 &&
-             data.dayIndex is number && data.dayIndex >= 0 && data.dayIndex <= 6 &&
-             data.exercises is list && data.exercises.size() > 0 &&
-             data.duration is number && data.duration > 0 && data.duration <= 300 &&
-             data.completed is bool &&
-             (!('overallRpe' in data) || (data.overallRpe is number && data.overallRpe >= 1 && data.overallRpe <= 10)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
-             (!('skippedExercises' in data) || (data.skippedExercises is list)) &&
-             (!('modifiedExercises' in data) || (data.modifiedExercises is list)) &&
-             (!('createdAt' in data) || data.createdAt is timestamp) &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp);
-    }
-
-    function isValidPlan(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.weekNumber is number && data.weekNumber >= 1 &&
-             data.startDate is timestamp &&
-             data.version is number && data.version >= 1 &&
-             data.days is list && data.days.size() >= 1 && data.days.size() <= 7 &&
-             (!('generatedBy' in data) || (data.generatedBy is string && data.generatedBy.size() <= 64)) &&
-             (!('adaptationReason' in data) || (data.adaptationReason is string && data.adaptationReason.size() <= 500)) &&
-             (!('createdAt' in data) || data.createdAt is timestamp) &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp);
-    }
-
-    function isValidWearableData(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.source is string && data.source in ['healthkit', 'googlefit', 'strava', 'garmin', 'whoop', 'oura'] &&
-             data.timestamp is timestamp &&
-             (!('steps' in data) || (data.steps is number && data.steps >= 0 && data.steps <= 1000000)) &&
-             (!('sleepDuration' in data) || (data.sleepDuration is number && data.sleepDuration >= 0 && data.sleepDuration <= 1440)) &&
-             (!('restingHeartRate' in data) || (data.restingHeartRate is number && data.restingHeartRate >= 30 && data.restingHeartRate <= 220)) &&
-             (!('hrv' in data) || (data.hrv is number && data.hrv >= 0 && data.hrv <= 500)) &&
+             data.content is string && data.content.size() <= 200000 &&
+             (!('title' in data) || (data.title is string && data.title.size() <= 256)) &&
+             (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 5000)) &&
+             (!('agentType' in data) || (data.agentType is string && data.agentType.size() <= 64)) &&
              (!('createdAt' in data) || data.createdAt is timestamp);
-    }
-
-    function isValidChatMessage(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.role is string && data.role in ['user', 'assistant', 'system'] &&
-             data.content is string && data.content.size() > 0 && data.content.size() <= 10000 &&
-             data.timestamp is timestamp &&
-             (!('agentId' in data) || (data.agentId is string && data.agentId.size() <= 64)) &&
-             (!('contextSnapshot' in data) || (data.contextSnapshot is map));
-    }
-
-    function isValidCheckIn(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.date is timestamp &&
-             data.energyLevel is number && data.energyLevel >= 1 && data.energyLevel <= 10 &&
-             data.motivationLevel is number && data.motivationLevel >= 1 && data.motivationLevel <= 10 &&
-             data.workoutCompleted is bool &&
-             (!('mood' in data) || (data.mood is string && data.mood.size() <= 200)) &&
-             (!('painOrIssues' in data) || (data.painOrIssues is string && data.painOrIssues.size() <= 1000)) &&
-             (!('muscleSoreness' in data) || (data.muscleSoreness is number && data.muscleSoreness >= 1 && data.muscleSoreness <= 10)) &&
-             (!('stressLevel' in data) || (data.stressLevel is number && data.stressLevel >= 1 && data.stressLevel <= 10)) &&
-             (!('skippedWorkoutReason' in data) || (data.skippedWorkoutReason is string && data.skippedWorkoutReason.size() <= 500)) &&
-             (!('createdAt' in data) || data.createdAt is timestamp);
-    }
-
-    function isValidRecoveryAssessment(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.assessedAt is timestamp &&
-             data.recoveryScore is number && data.recoveryScore >= 0 && data.recoveryScore <= 100 &&
-             data.recommendation is string && data.recommendation in ['train_normal', 'reduce_intensity', 'rest_day', 'active_recovery'] &&
-             data.dataSources is list &&
-             data.dataAgeHours is number && data.dataAgeHours >= 0 && data.dataAgeHours <= 168 &&
-             (!('generatedBy' in data) || (data.generatedBy is string && data.generatedBy.size() <= 64));
-    }
-
-    function isValidSubscription(data) {
-      return data.userId is string && data.userId.size() <= 128 &&
-             data.tier is string && data.tier in ['free', 'premium', 'elite'] &&
-             (!('stripeCustomerId' in data) || (data.stripeCustomerId is string && data.stripeCustomerId.size() <= 256)) &&
-             (!('stripeSubscriptionId' in data) || (data.stripeSubscriptionId is string && data.stripeSubscriptionId.size() <= 256)) &&
-             (!('currentPeriodStart' in data) || data.currentPeriodStart is timestamp) &&
-             (!('currentPeriodEnd' in data) || data.currentPeriodEnd is timestamp) &&
-             (!('cancelledAt' in data) || data.cancelledAt is timestamp) &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     // --- COLLECTIONS ---
@@ -147,272 +59,46 @@ service cloud.firestore {
     // Collection: users/{userId}
     match /users/{userId} {
       allow get: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidProfile(incoming()) &&
+      allow create: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidUser(incoming()) &&
                        incoming().uid == userId &&
-                       incoming().createdAt == request.time &&
-                       incoming().healthDataConsent == true &&
-                       incoming().disclaimerAccepted == true;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidProfile(incoming()) &&
+                       incoming().createdAt == request.time;
+                       
+      allow update: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidUser(incoming()) &&
                        incoming().uid == existing().uid &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().updatedAt == request.time;
-
+                       
       allow delete: if isOwner(userId);
     }
 
-    // Subcollection: users/{userId}/profile
-    // Singleton profile per user — stored as users/{userId}/profile/doc
-    match /users/{userId}/profile/{profileId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(profileId) &&
-                       profileId == 'main' &&
-                       isValidProfile(incoming()) &&
-                       incoming().uid == userId &&
-                       incoming().createdAt == request.time &&
-                       incoming().healthDataConsent == true &&
-                       incoming().disclaimerAccepted == true;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(profileId) &&
-                       profileId == 'main' &&
-                       isValidProfile(incoming()) &&
-                       incoming().uid == existing().uid &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/workouts/{workoutId}
-    match /users/{userId}/workouts/{workoutId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(workoutId) &&
-                       isValidWorkoutLog(incoming()) &&
-                       incoming().id == workoutId &&
+    // Subcollection: users/{userId}/documents/{docId}
+    match /users/{userId}/documents/{docId} {
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidId(docId) && 
+                       isValidDocument(incoming()) &&
+                       incoming().id == docId &&
                        incoming().userId == userId &&
                        incoming().createdAt == request.time;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(workoutId) &&
-                       isValidWorkoutLog(incoming()) &&
+                       
+      allow update: if isOwner(userId) && 
+                       isEmailVerified() && 
+                       isValidId(userId) && 
+                       isValidId(docId) && 
+                       isValidDocument(incoming()) &&
                        incoming().id == existing().id &&
                        incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time;
-
+                       incoming().createdAt == existing().createdAt;
+                       
       allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/plans/{planId}
-    match /users/{userId}/plans/{planId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(planId) &&
-                       isValidPlan(incoming()) &&
-                       incoming().id == planId &&
-                       incoming().userId == userId &&
-                       incoming().createdAt == request.time;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(planId) &&
-                       isValidPlan(incoming()) &&
-                       incoming().id == existing().id &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time &&
-                       // Prevent tampering with generated plans
-                       incoming().generatedBy == existing().generatedBy;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/wearableData/{dataId}
-    match /users/{userId}/wearableData/{dataId} {
-      // Health data requires explicit consent
-      allow get: if isOwner(userId) &&
-                    get(/databases/$(database)/documents/users/$(userId)).data.healthDataConsent == true;
-      allow list: if isOwner(userId) &&
-                     get(/databases/$(database)/documents/users/$(userId)).data.healthDataConsent == true;
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(dataId) &&
-                       isValidWearableData(incoming()) &&
-                       incoming().id == dataId &&
-                       incoming().userId == userId &&
-                       incoming().createdAt == request.time &&
-                       // Consent check on creation
-                       get(/databases/$(database)/documents/users/$(userId)).data.healthDataConsent == true;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(dataId) &&
-                       isValidWearableData(incoming()) &&
-                       incoming().id == existing().id &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time &&
-                       // Consent check on update
-                       get(/databases/$(database)/documents/users/$(userId)).data.healthDataConsent == true;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/chatSessions/{sessionId}
-    match /users/{userId}/chatSessions/{sessionId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(sessionId) &&
-                       incoming().userId == userId &&
-                       incoming().createdAt == request.time;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(sessionId) &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/chatSessions/{sessionId}/messages/{messageId}
-    match /users/{userId}/chatSessions/{sessionId}/messages/{messageId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(messageId) &&
-                       isValidChatMessage(incoming()) &&
-                       incoming().id == messageId &&
-                       incoming().timestamp == request.time;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/checkIns/{checkInId}
-    match /users/{userId}/checkIns/{checkInId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(checkInId) &&
-                       isValidCheckIn(incoming()) &&
-                       incoming().id == checkInId &&
-                       incoming().userId == userId &&
-                       incoming().createdAt == request.time;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(checkInId) &&
-                       isValidCheckIn(incoming()) &&
-                       incoming().id == existing().id &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/recovery/{assessmentId}
-    match /users/{userId}/recovery/{assessmentId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(assessmentId) &&
-                       isValidRecoveryAssessment(incoming()) &&
-                       incoming().id == assessmentId &&
-                       incoming().userId == userId &&
-                       incoming().createdAt == request.time;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(assessmentId) &&
-                       isValidRecoveryAssessment(incoming()) &&
-                       incoming().id == existing().id &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // Subcollection: users/{userId}/subscription/doc
-    match /users/{userId}/subscription/{subId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(subId) &&
-                       subId == 'main' &&
-                       isValidSubscription(incoming()) &&
-                       incoming().userId == userId &&
-                       incoming().updatedAt == request.time;
-
-      allow update: if isOwner(userId) &&
-                       isEmailVerified() &&
-                       isValidId(userId) &&
-                       isValidId(subId) &&
-                       subId == 'main' &&
-                       isValidSubscription(incoming()) &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt == request.time;
-
-      allow delete: if isOwner(userId);
-    }
-
-    // ─── PUBLIC READ-ONLY: Exercise library (no auth required) ─────────
-    // Stored as a top-level collection for global read access
-    match /exerciseLibrary/{exerciseId} {
-      allow read: if true;  // Public — exercise metadata is not personal data
-      allow write, update, delete: if false;  // Server/admin only via Firebase admin SDK
     }
   }
 }

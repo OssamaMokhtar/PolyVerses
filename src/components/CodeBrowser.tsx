@@ -48,6 +48,9 @@ export function CodeBrowser() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[calc(100vh-140px)]">
+      <div className="lg:col-span-12 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+        Reference design: these files illustrate a target Python/LangGraph backend. They are not the code this app runs (see <code>server.ts</code>).
+      </div>
       
       {/* Sidebar Navigation */}
       <div className="lg:col-span-4 bg-[#121215]/85 border border-[#27272A] rounded-xl p-4 flex flex-col h-[650px] overflow-hidden shadow-lg">

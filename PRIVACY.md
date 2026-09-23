@@ -33,4 +33,4 @@ For privacy inquiries, contact the maintainer.
 
 ---
 
-*See [Improvement Plan — PolyVerses](../../Obsidian/Portfolio-Due-Diligence/05-Improvement-Plan-PolyVerses.md) for the full compliance roadmap.*
+*Open items are ranked in [docs/GAPS.md](docs/GAPS.md).*

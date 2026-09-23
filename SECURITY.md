@@ -4,7 +4,7 @@
 
 ## Architecture Security Model
 
-Firestore security rules (documented in [security_spec.md](docs/security_spec.md)):
+Firestore security rules (documented in [security_spec.md](security_spec.md)):
 - Default-deny catch-all
 - Venue/ownership checks on every path
 - Email verification required for writes
@@ -38,4 +38,4 @@ Contact the maintainer directly. Do not open a public issue for security vulnera
 
 ---
 
-*See [Improvement Plan — PolyVerses](../../Obsidian/Portfolio-Due-Diligence/05-Improvement-Plan-PolyVerses.md) for the full security hardening roadmap.*
+*Open items are ranked in [docs/GAPS.md](docs/GAPS.md).*
