@@ -10,6 +10,8 @@
 
 > **Decision, 23 Sep 2026: one product, not three.** Between 11 and 22 Sep this repo was repurposed as the PolySync fitness coach. That code now lives in [PolySync `app/`](https://github.com/OssamaMokhtar/PolySync/tree/main/app), with its history. PolyVerses is back to being the PM workbench, and it no longer keeps its own copy of the skill library: [Product Leadership OS](https://github.com/OssamaMokhtar/product-leadership-os) is the single source for the skills, and PolyVerses is where they run.
 
+**Architecture docs:** [full set](docs/README.md) · [status](docs/00-status.md) · [system architecture](docs/01-system-architecture.md) · [agent architecture](docs/04-agent-architecture.md) · [evaluation](docs/07-evaluation.md) · [decision log](docs/10-decision-log.md) · [gaps](docs/GAPS.md)
+
 ---
 
 ## What is built
@@ -18,7 +20,9 @@
 |---|---|
 | Orchestration console | Runs a staged workflow (opportunity → compliance → PRD → rollback check) with human approval gates between stages |
 | Agent calls | One server endpoint (`POST /api/evaluate`) with **5 prompt-specialised agent modes**: router, opportunity (RICE), compliance, PRD, rollback. The larger agent roster shown in the UI is design, not separate running agents |
-| Observability dashboard, agent network diagram, prompt console, heatmaps | UI over run logs and agent metadata |
+| Observability dashboard | **Simulated metrics**, generated in the browser and labelled as such on screen. No infrastructure is monitored |
+| Code browser | **Reference design** for a target Python/LangGraph backend, labelled as such. Not the code this app runs (`server.ts` is) |
+| Agent network diagram, prompt console, heatmaps | UI over run logs and agent metadata |
 | Persistence | Generated PRDs saved per user in Firestore |
 | Security | Gemini key server-side only (CI checks the client bundle); Firestore rules default-deny with ownership and schema checks ([`security_spec.md`](security_spec.md)) |
 

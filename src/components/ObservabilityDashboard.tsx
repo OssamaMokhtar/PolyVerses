@@ -65,7 +65,10 @@ export function ObservabilityDashboard() {
             <span className="text-xs font-mono tracking-wider text-cyan-400 uppercase font-medium">Route53 Active-Passive Multi-Region failover</span>
             <h3 className="text-xl font-sans font-medium text-slate-200 mt-0.5">Global Cluster Failover Management</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-xl leading-relaxed">
-              PolyVerses tracks DNS health metrics on a 10s interval. Breaches trigger emergency traffic flow routing using weighted DNS values in &lt;120 seconds.
+              Design preview of multi-region failover monitoring.
+            </p>
+            <p className="mt-2 inline-block rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300">
+              Simulated metrics: these numbers are generated in the browser for demonstration. No infrastructure is being monitored.
             </p>
           </div>
 
