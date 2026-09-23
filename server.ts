@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { createRateLimiter, validateEvaluateInput } from "./server/guard.ts";
 
 dotenv.config();
 
@@ -10,7 +11,10 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  // Behind a platform proxy req.ip must be the caller, not the proxy.
+  app.set("trust proxy", 1);
+  app.use(express.json({ limit: "64kb" }));
+  const allowEvaluate = createRateLimiter(Number(process.env.EVALUATE_RATE_PER_MIN) || 20, 60_000);
 
   // Instantiate Gemini API Client safely on the server side
   let ai: GoogleGenAI | null = null;
@@ -36,6 +40,17 @@ async function startServer() {
 
   // --- API ROUTE FOR AGENT WORKFLOW EVALUATIONS ---
   app.post("/api/evaluate", async (req: express.Request, res: express.Response): Promise<void> => {
+    const limited = allowEvaluate(req.ip || "unknown");
+    if (!limited.ok) {
+      res.set("Retry-After", String(limited.retryAfterSec));
+      res.status(429).json({ error: "Too many requests. Try again shortly." });
+      return;
+    }
+    const invalid = validateEvaluateInput(req.body);
+    if (invalid) {
+      res.status(400).json({ error: invalid });
+      return;
+    }
     const { prompt, priority, role, agentType, userContext } = req.body;
 
     const actualPriority = priority || "Medium";

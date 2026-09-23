@@ -12,6 +12,7 @@ PolyVerses is the runtime for [Product Leadership OS](https://github.com/OssamaM
 | 03 | [API](03-api.md) | The one server route |
 | 04 | [Agent architecture](04-agent-architecture.md) | The 5 agent modes, the staged workflow, human gates |
 | 07 | [Evaluation](07-evaluation.md) | What is tested and what is not |
+| 08 | [Security](08-security.md) | Trust boundaries, controls with their evidence, open risks |
 | 10 | [Decision log](10-decision-log.md) | ADRs with reversal triggers |
 | — | [Multi-tenancy](multi-tenancy.md) | Design for teams (not built) |
 | — | [Gaps](GAPS.md) | Ranked open issues |
