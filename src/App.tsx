@@ -1,58 +1,26 @@
 import { useState, useEffect } from 'react';
 import { FitnessOnboarding } from './components/FitnessOnboarding';
-import {
-  Target, Dumbbell, Activity, Heart, Clock, BarChart3, Users, Zap,
+import { ThinkSurface } from './components/ThinkSurface';
+import { ObservabilityDashboard } from './components/ObservabilityDashboard';
+import { 
+  Target, Dumbbell, Activity, Heart, Clock, BarChart3, Users, Zap, 
   ChevronUp, ChevronDown, Pause, Play, Plus, Minus, Clock as ClockIcon,
-  Sparkles, Check, AlertTriangle, Settings, LogOut, Crown, Download, Trash2, TrendingUp, Globe, ChevronRight, Flame, Info
+  Sparkles, Check, AlertTriangle, Settings, LogOut, Brain
 } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { FitnessProfile, WeeklyPlan, WorkoutLogEntry, SupportedLanguage, LANGUAGE_CONFIG, ChatResponse } from './types';
-import { EXERCISE_LIBRARY, EXERCISE_BY_ID } from './ExerciseLibrary';
-import { CoachChat } from './components/CoachingChat';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import { RecoveryDashboard } from './components/RecoveryDashboard';
-import { ProgressDashboard } from './components/ProgressDashboard';
-import { CheckInForm } from './components/CheckInForm';
-import { InsightsDashboard } from './components/InsightsDashboard';
-import { SubscriptionStatus, ExportButton, DeleteAccountButton } from './components/SettingsComponents';
-import { FormCueButton } from './components/FormCueButton';
-import { NutritionPanel } from './components/NutritionPanel';
+import { FitnessProfile, WeeklyPlan, WorkoutLogEntry } from './types';
+import { EXERCISE_LIBRARY } from './ExerciseLibrary';
 
-type FitnessTab = 'today' | 'weekly' | 'progress' | 'insights' | 'coach' | 'settings';
-
-const LANGUAGES: { code: SupportedLanguage; flag: string; name: string }[] = [
-  { code: 'en', flag: '🇬🇧', name: 'English' },
-  { code: 'es', flag: '🇪🇸', name: 'Español' },
-  { code: 'fr', flag: '🇫🇷', name: 'Français' },
-  { code: 'de', flag: '🇩🇪', name: 'Deutsch' },
-  { code: 'ar', flag: '🇸🇦', name: 'العربية' },
-  { code: 'zh', flag: '🇨🇳', name: '中文' },
-];
-
-async function promptForWeight(userId: string): Promise<number | null> {
-  const weight = window.prompt ? window.prompt('Enter your current body weight (kg):') : null;
-  if (weight === null || weight === '') return null;
-  const parsed = parseFloat(weight);
-  return isNaN(parsed) || parsed <= 0 ? null : parsed;
-}
-
-async function logWeightEntry(userId: string, weight: number) {
-  const entry: WeightEntry = { userId, date: Date.now(), weight };
-  const res = await fetch('/api/fitness/weight', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
-    body: JSON.stringify(entry),
-  });
-  if (!res.ok) console.error('Failed to log weight:', await res.text());
-}
+type FitnessTab = 'today' | 'weekly' | 'progress' | 'coach' | 'settings';
+type PmTab = 'think' | 'observe';
 
 export default function App() {
   const [onboarded, setOnboarded] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<FitnessTab>('today');
+  const [activeTab, setActiveTab] = useState<FitnessTab | PmTab>('today');
   const [profile, setProfile] = useState<FitnessProfile | null>(null);
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [todayWorkout, setTodayWorkout] = useState<{ day: any; workout: any } | null>(null);
@@ -203,7 +171,7 @@ export default function App() {
         dayIndex: todayWorkout.day.dayIndex,
         exercises: Object.entries(exerciseLogs).map(([exId, sets]) => ({
           exerciseId: exId,
-          name: EXERCISE_BY_ID[exId]?.name || exId,
+          name: EXERCISE_LIBRARY[parseInt(exId)]?.name || exId,
           category: '',
           primaryMuscles: [],
           prescribedSets: sets.length,
@@ -246,13 +214,15 @@ export default function App() {
     }
   };
 
-  const tabs: { id: FitnessTab; icon: any; label: string }[] = [
+  const tabs: { id: FitnessTab | PmTab; icon: any; label: string }[] = [
     { id: 'today', icon: Activity, label: "Today's Workout" },
     { id: 'weekly', icon: Target, label: 'Weekly Plan' },
     { id: 'progress', icon: BarChart3, label: 'Progress' },
     { id: 'insights', icon: TrendingUp, label: 'Insights' },
     { id: 'coach', icon: Sparkles, label: 'Coach Chat' },
     { id: 'settings', icon: Settings, label: 'Settings' },
+    { id: 'think', icon: Brain, label: 'PM Workbench' },
+    { id: 'observe', icon: Activity, label: 'Observability' },
   ];
 
   const renderToday = () => {
@@ -852,10 +822,10 @@ export default function App() {
         </div>
 
         <div className="mt-4 p-4 bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl text-xs text-[#71717A]">
-          <p className="font-medium text-[#E4E4E7] mb-2">About PolySync</p>
-          <p className="leading-relaxed">
-            AI Fitness Coach Platform · Version 1.0<br />
-            Built with React + Firebase + Gemini AI<br />
+          <div className="font-medium text-[#E4E4E7] mb-2">About PolyVerses</div>
+          <div>
+            PolyVerses PM Workbench · Version 1.0<br/>
+            Built with React + Firebase + Gemini AI<br/>
             <a href="https://github.com/OssamaMokhtar/PolyVerses" className="text-[#00A3FF] hover:underline" target="_blank" rel="noopener noreferrer">
               View on GitHub →
             </a>
@@ -897,7 +867,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0C0C0E] text-[#E4E4E7] flex flex-col items-center justify-center p-4 border-[10px] border-[#1A1A1E]">
         <Activity className="w-10 h-10 text-[#00A3FF] animate-spin mb-4" />
-        <span className="font-mono text-xs text-[#00A3FF] tracking-widest uppercase">Loading PolySync...</span>
+        <span className="font-mono text-xs text-[#00A3FF] tracking-widest uppercase">Loading PolyVerses...</span>
       </div>
     );
   }
@@ -918,9 +888,9 @@ export default function App() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-sm font-bold tracking-wider uppercase font-mono text-[#F4F4F5]">PolySync</h1>
+              <h1 className="text-sm font-bold tracking-wider uppercase font-mono text-[#F4F4F5]">PolyVerses</h1>
               <span className="text-[9px] font-bold font-mono text-[#00A3FF] px-1.5 py-0.5 bg-[#00A3FF]/10 border border-[#00A3FF]/30 rounded uppercase">
-                AI Fitness Coach
+                PM Workbench
               </span>
             </div>
             <div className="text-xs text-[#71717A] mt-0.5">
@@ -973,11 +943,12 @@ export default function App() {
         {activeTab === 'insights' && renderInsights()}
         {activeTab === 'coach' && renderCoachChat()}
         {activeTab === 'settings' && renderSettings()}
+        {activeTab === 'think' && <ThinkSurface className="p-4" />}
+        {activeTab === 'observe' && <ObservabilityDashboard className="p-4" />}
       </div>
 
       <div className="mt-4 text-xs text-[#71717A] text-center border-t border-[#27272A] pt-3">
-        PolySync provides AI-generated fitness guidance. Always warm up properly and listen to your body.
-        Consult a healthcare professional for injuries or medical conditions.
+        PolyVerses provides AI-powered product management assistance. Always validate AI-generated recommendations against your product context and stakeholder input.
       </div>
     </div>
     </ErrorBoundary>
