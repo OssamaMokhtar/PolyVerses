@@ -83,10 +83,10 @@ function computeRecoveryScore(input: RecoveryInput): {
     return { score, recommendation: "reduce_intensity", text: "Moderate recovery — consider lighter intensity today.",
       factors, dataSources: [], dataAgeHours: 0 };
   } else if (score >= 40) {
-    return { score, recommendation: "active_recovery", text: "Low recovery — reduce volume or take active recovery.",
+    return { score, recommendation: "reduce_volume", text: "Low recovery — reduce volume or take active recovery.",
       factors, dataSources: [], dataAgeHours: 0 };
   } else {
-    return { score, recommendation: "rest_day", text: "Poor recovery — rest today and focus on sleep and nutrition.",
+    return { score, recommendation: "rest", text: "Poor recovery — rest today and focus on sleep and nutrition.",
       factors, dataSources: [], dataAgeHours: 0 };
   }
 }
@@ -231,7 +231,6 @@ async function generateAdaptation(
       plan.version = prevVersion + 1;
       if (recoveryScore >= 60) {
         plan.adaptationReason = `Workout completed — progressive overload (+5% intensity, recovery ${recoveryScore})`;
-        // Increase prescribed sets by 1 for exercises that were completed
         plan.days = plan.days.map(day => ({
           ...day,
           workouts: day.workouts?.map(w => ({
@@ -402,7 +401,6 @@ async function startServer() {
         return;
       }
 
-      // Generate plan using Gemini if available, otherwise use deterministic algorithm
       if (ai) {
         try {
           const prompt = buildPlanGenerationPrompt(profile);
@@ -542,7 +540,6 @@ async function startServer() {
       workout.createdAt = serverTimestamp();
       const snap = await addDoc(collection(db, "users", uid, "workouts"), workout as any);
 
-      // Trigger adaptation
       try {
         const adaptedPlan = await generateAdaptation(uid, workout);
         res.json({ success: true, workoutId: snap.id, adaptedPlan });
@@ -592,15 +589,12 @@ async function startServer() {
       }
 
       const start = Date.now();
-
-      // Get user context for the chat agent
       const profile = await getProfile(uid);
       let context = "";
       if (profile) {
-        context = `User profile: goal=${profile.goal}, level=${profile.level}, injuries=[${profile.injuries.join(", ")}], equipment=[${profile.equipment.join(", ")}], daysPerWeek=${profile.daysPerWeek}, sessionDuration=${profile.sessionDuration}min`;
+        context = `User profile: goal=${profile.goal}, level=${profile.level}, injuries=[${profile.injuries.join(", ")}], equipment=[${profile.equipment.join(", ")}], daysPerWeek=${profile.daysPerWeek}, sessionDuration=${profile.sessionDuration}`;
       }
 
-      // Language instruction prefix
       const langInstruction = lang && lang !== "en"
         ? `Respond in ${lang}. Write all text in ${lang} including greetings, explanations, and follow-up questions.`
         : "";
@@ -610,13 +604,11 @@ async function startServer() {
 
       if (ai) {
         try {
-          const fullPrompt = `${langInstruction ? langInstruction + "\n\n" : ""}Context: ${context}\n\nUser question: ${message}\n\nProvide a helpful, personalized fitness coaching response. Be encouraging but factual. End with 2-3 follow-up questions the user might want to ask next, formatted as a JSON array of short strings (e.g. ["How many sets should I do?", "What weight should I use?"]). Only include the JSON array at the very end of your response, nothing after it. If the question is about injuries or medical conditions, include a disclaimer that you are an AI fitness coach, not a medical professional, and recommend consulting a healthcare provider.`;
+          const fullPrompt = `${langInstruction ? langInstruction + "\n\n" : ""}Context: ${context}\n\nUser question: ${message}\n\nProvide a helpful, personalized fitness coaching response. Be encouraging and actionable.`;
 
-          // Try streaming first if client supports it
           const streamMode = req.query.stream === 'true';
 
           if (streamMode) {
-            // SSE streaming mode
             (res as any).writeHead(200, {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
@@ -624,8 +616,6 @@ async function startServer() {
             });
 
             let fullText = '';
-            let lastChunkTime = start;
-
             const stream = await ai.models.generateContentStream({
               model: "gemini-3.5-flash",
               contents: fullPrompt,
@@ -640,16 +630,13 @@ async function startServer() {
               fullText += text;
               const now = Date.now();
               res.write(`data: ${JSON.stringify({ text, delta: text, elapsed: now - start })}\n\n`);
-              lastChunkTime = now;
             }
 
-            // Extract suggestions from the last lines (JSON array)
             const suggestionMatch = fullText.match(/\[[\s\S]*?\]/);
             if (suggestionMatch) {
               try {
                 suggestions = JSON.parse(suggestionMatch[0]);
               } catch {
-                // Fall back: extract sentences that look like questions
                 const sentences = fullText.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 10 && s.endsWith('?'));
                 suggestions = sentences.slice(0, 3);
               }
@@ -659,7 +646,6 @@ async function startServer() {
             res.write(`data: ${JSON.stringify({ done: true, response: fullText, suggestions, responseTime: elapsed })}\n\n`);
             res.end();
 
-            // Save to Firestore after streaming completes
             const messageData = {
               id: crypto.randomUUID(),
               role: "user" as const,
@@ -691,7 +677,6 @@ async function startServer() {
 
             return;
           } else {
-            // Non-streaming mode: return full response with suggestions + timing
             const response = await ai.models.generateContent({
               model: "gemini-3.5-flash",
               contents: fullPrompt,
@@ -702,12 +687,10 @@ async function startServer() {
             });
             responseText = response.text || "Sorry, I couldn't generate a response.";
 
-            // Extract suggestions from response
             const suggestionMatch = responseText.match(/\[[\s\S]*?\]/);
             if (suggestionMatch) {
               try {
                 suggestions = JSON.parse(suggestionMatch[0]);
-                // Remove the JSON array from the response text
                 responseText = responseText.slice(0, suggestionMatch.index).trim();
               } catch {
                 const sentences = responseText.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 10 && s.endsWith('?'));
@@ -725,7 +708,6 @@ async function startServer() {
 
       const elapsed = Date.now() - start;
 
-      // Save message to chat session
       const messageData = {
         id: crypto.randomUUID(),
         role: "user" as const,
@@ -782,8 +764,8 @@ async function startServer() {
       if (ai) {
         try {
           const prompt = userDescription
-            ? `Exercise: ${exerciseId || "unknown"}. User describes their movement feel: "${userDescription}". Provide specific form cues and corrections based on this description. If exerciseId is provided, use it to give exercise-specific cues.`
-            : `Exercise: ${exerciseId}. Provide form cues and common mistakes for this exercise. Be specific and actionable.`;
+            ? `Exercise: ${exerciseId || "unknown"}. User describes their movement feel: "${userDescription}". Provide specific form cues and corrections based on this description.`
+            : `Exercise: ${exerciseId}. Provide form cues and common mistakes for this exercise.`;
           const response = await ai.models.generateContent({
             model: "gemini-3.5-flash",
             contents: prompt,
@@ -818,7 +800,7 @@ async function startServer() {
 
       if (ai) {
         try {
-          const prompt = `User nutrition question: "${query}". Profile context: ${profile ? `goal=${profile.goal}, level=${profile.level}` : "none"}. Provide practical, evidence-based nutrition guidance. If the question is about supplements or medical nutrition, include a disclaimer. Estimate calories/macros if relevant based on the profile.`;
+          const prompt = `User nutrition question: "${query}". Profile context: ${profile ? `goal=${profile.goal}, level=${profile.level}` : "none"}. Provide practical, evidence-based nutrition guidance.`;
           const geminiResponse = await ai.models.generateContent({
             model: "gemini-3.5-flash",
             contents: prompt,
@@ -859,11 +841,6 @@ async function startServer() {
   });
 
   // F10 — Wearable Data Ingest Agent (HealthKit + Google Fit)
-  // Note: Web HealthKit access requires Safari 15+ on iOS 15+/macOS 11+.
-  // Google Fit requires OAuth 2.0 flow via Google Identity Services.
-  // Both are stubbed here; full implementations require native companion app
-  // or browser-specific APIs that are only available in secure contexts.
-
   app.post("/api/fitness/wearable/ingest", async (req, res) => {
     const uid = requireAuth(req, res);
     if (!uid) return;
@@ -877,7 +854,6 @@ async function startServer() {
         return;
       }
 
-      // Validate and normalize
       const normalized: WearableDataPoint[] = data
         .filter((d: any) => d.timestamp && typeof d.timestamp === 'number')
         .map((d: any, i: number) => ({
@@ -899,7 +875,6 @@ async function startServer() {
           createdAt: Date.now(),
         }));
 
-      // Save to Firestore
       const userWearableRef = doc(db, "users", uid, "wearableData", "points");
       const existingSnap = await getDoc(userWearableRef);
       const existingPoints: WearableDataPoint[] = existingSnap.exists() ? (existingSnap.data().points || []) : [];
@@ -908,7 +883,6 @@ async function startServer() {
         .slice(0, 500);
       await setDoc(userWearableRef, { points: merged, updatedAt: Date.now() }, { merge: true });
 
-      // Update summary
       const summaryRef = doc(db, "users", uid, "wearableData", "current");
       await setDoc(summaryRef, {
         source,
@@ -983,7 +957,6 @@ async function startServer() {
         }
       });
 
-      // Calculate streak
       const workoutDates = [...new Set(logs.map(l => {
         const d = new Date(l.date);
         return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -992,7 +965,6 @@ async function startServer() {
       let streak = 0;
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      let checkDate = new Date(today);
 
       for (const dateStr of workoutDates) {
         const logDate = new Date(dateStr + 'T00:00:00');
@@ -1005,7 +977,6 @@ async function startServer() {
         }
       }
 
-      // Longest streak
       let longestStreak = 0;
       let currentStreak = 0;
       const sortedDates = [...new Set(logs.map(l => {
@@ -1023,7 +994,6 @@ async function startServer() {
       }
       longestStreak = Math.max(longestStreak, currentStreak);
 
-      // Total workouts
       const totalWorkouts = logs.length;
       const last7Days = logs.filter(l => {
         const d = new Date(l.date);
@@ -1050,7 +1020,6 @@ async function startServer() {
     const uid = requireAuth(req, res);
     if (!uid) return;
     try {
-      // Fetch all data in parallel
       const [profileSnap, checksSnap, logsSnap, recoverySnap] = await Promise.all([
         getDoc(doc(db, "users", uid, "profile", "current")),
         getDocs(query(collection(db, "users", uid, "checkIns"), orderBy("createdAt", "desc"), limit(20))),
@@ -1063,14 +1032,12 @@ async function startServer() {
       const logs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const recoveries = recoverySnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-      // Time periods
       const now = new Date();
       const startOfWeek = new Date(now);
       startOfWeek.setDate(now.getDate() - now.getDay());
       startOfWeek.setHours(0, 0, 0, 0);
       const endOfWeek = new Date(startOfWeek);
       endOfWeek.setDate(endOfWeek.getDate() + 7);
-
       const startLastWeek = new Date(startOfWeek);
       startLastWeek.setDate(startLastWeek.getDate() - 7);
 
@@ -1092,12 +1059,11 @@ async function startServer() {
         return d >= startLastWeek && d < startOfWeek;
       });
 
-      // Volume calculation
       const calcVolume = (workoutLogs: any[]) => {
         let total = 0;
         workoutLogs.forEach(l => {
           const sets = l.sets || [];
-          sets.forEach(s => {
+          sets.forEach((s: any) => {
             total += (s.weight || 0) * (s.repCount || 0);
           });
         });
@@ -1107,12 +1073,11 @@ async function startServer() {
       const thisWeekVolume = calcVolume(thisWeekLogs);
       const lastWeekVolume = calcVolume(lastWeekLogs);
 
-      // RPE average
       const calcAvgRPE = (workoutLogs: any[]) => {
         const rpes: number[] = [];
         workoutLogs.forEach(l => {
           const sets = l.sets || [];
-          sets.forEach(s => {
+          sets.forEach((s: any) => {
             if (typeof s.rpe === 'number' && s.rpe > 0) rpes.push(s.rpe);
           });
           if (typeof l.rpe === 'number' && l.rpe > 0) rpes.push(l.rpe);
@@ -1123,7 +1088,6 @@ async function startServer() {
       const thisWeekRPE = calcAvgRPE(thisWeekLogs);
       const lastWeekRPE = calcAvgRPE(lastWeekLogs);
 
-      // Completion rate
       const calcCompletion = (checks: any[]) => {
         if (checks.length === 0) return 0;
         const completed = checks.filter(c => c.mood !== 'skipped').length;
@@ -1133,7 +1097,6 @@ async function startServer() {
       const thisWeekCompletion = calcCompletion(thisWeekCheckIns);
       const lastWeekCompletion = calcCompletion(lastWeekCheckIns);
 
-      // Streak calculation
       const allDates = [...new Set(logs.map(l => {
         const d = new Date(l.createdAt);
         d.setHours(0, 0, 0, 0);
@@ -1151,7 +1114,6 @@ async function startServer() {
           currentStreak++;
           longestStreak = Math.max(longestStreak, currentStreak);
         } else if (i === allDates.length - 1) {
-          // Allow for yesterday if today is missing
           const yesterday = new Date(today.getTime() - 86400000);
           if (allDates.includes(yesterday.getTime())) {
             currentStreak++;
@@ -1163,8 +1125,7 @@ async function startServer() {
         }
       }
 
-      // Weekly volume trend (last 8 weeks)
-      const weeklyTrend = [];
+      const weeklyTrend: { week: string; volume: number }[] = [];
       for (let w = 7; w >= 0; w--) {
         const weekStart = new Date(now);
         weekStart.setDate(now.getDate() - w * 7);
@@ -1177,19 +1138,16 @@ async function startServer() {
           return d >= weekStart && d < weekEnd;
         });
 
-        const weekNum = Math.floor(w / 7) + 1;
-        const weekLabel = `${weekNum}`;
         weeklyTrend.push({
-          week: weekLabel,
+          week: `${Math.floor(w / 7) + 1}`,
           volume: calcVolume(weekLogs),
         });
       }
 
-      // Top exercises
       const exerciseTotals: Record<string, { volume: number; count: number }> = {};
       logs.forEach(l => {
         const sets = l.sets || [];
-        sets.forEach(s => {
+        sets.forEach((s: any) => {
           const exId = s.exerciseId || s.exerciseName || 'unknown';
           const exName = s.exerciseName || EXERCISE_NAMES[exId] || exId;
           if (!exerciseTotals[exName]) exerciseTotals[exName] = { volume: 0, count: 0 };
@@ -1203,121 +1161,6 @@ async function startServer() {
         .sort((a, b) => b.totalVolume - a.totalVolume)
         .slice(0, 5);
 
-      // Recovery trend
-      const recoveryTrend = recoveries.slice(0, 10).map(r => ({
-        date: new Date(r.createdAt).toISOString().split('T')[0],
-        score: r.recoveryScore || 0,
-      }));
-
-      const numWeeks = Math.max(1, Math.floor(logs.length / 12));
-
-      res.json({
-        periodLabel: `Last 7 days vs prior 7 days`,
-        workoutsThisPeriod: thisWeekLogs.length,
-        workoutsLastPeriod: lastWeekLogs.length,
-        completionRate: thisWeekCompletion,
-        completionRateLast: lastWeekCompletion,
-        totalVolume: thisWeekVolume,
-        totalVolumeLast: lastWeekVolume,
-        avgRPE: thisWeekRPE,
-        avgRPELast: lastWeekRPE,
-        currentStreak,
-        longestStreak,
-        weeklyVolumeTrend: weeklyTrend.filter(w => w.volume > 0),
-        topExercises,
-        recoveryTrend,
-      });
-    } catch (err) {
-      console.error("Insights endpoint error:", err);
-      res.status(500).json({ error: "Failed to calculate insights" });
-    }
-  });
-
-  
-  // 5.2 — Personalized insights dashboard
-  app.get("/api/fitness/insights", async (req, res) => {
-    const uid = requireAuth(req, res);
-    if (!uid) return;
-    try {
-      const [profileSnap, checksSnap, logsSnap, recoverySnap] = await Promise.all([
-        getDoc(doc(db, "users", uid, "profile", "current")),
-        getDocs(query(collection(db, "users", uid, "checkIns"), orderBy("createdAt", "desc"), limit(20))),
-        getDocs(query(collection(db, "users", uid, "workouts"), orderBy("createdAt", "desc"))),
-        getDocs(query(collection(db, "users", uid, "recovery"), orderBy("createdAt", "desc"))),
-      ]);
-
-      const profile = profileSnap.exists() ? (profileSnap.data() as any) : {};
-      const checks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const logs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const recoveries = recoverySnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      const now = new Date();
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - now.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(endOfWeek.getDate() + 7);
-      const startLastWeek = new Date(startOfWeek);
-      startLastWeek.setDate(startLastWeek.getDate() - 7);
-
-      const thisWeekLogs = logs.filter(l => { const d = new Date(l.createdAt); return d >= startOfWeek && d < endOfWeek; });
-      const lastWeekLogs = logs.filter(l => { const d = new Date(l.createdAt); return d >= startLastWeek && d < startOfWeek; });
-      const thisWeekCheckIns = checks.filter(c => { const d = new Date(c.createdAt); return d >= startOfWeek && d < endOfWeek; });
-      const lastWeekCheckIns = checks.filter(c => { const d = new Date(c.createdAt); return d >= startLastWeek && d < startOfWeek; });
-
-      const calcVolume = (wl: any[]) => { let t = 0; wl.forEach(l => { (l.sets || []).forEach(s => { t += (s.weight || 0) * (s.repCount || 0); }); }); return t; };
-      const calcAvgRPE = (wl: any[]) => {
-        const rpes: number[] = [];
-        wl.forEach(l => { (l.sets || []).forEach(s => { if (typeof s.rpe === 'number' && s.rpe > 0) rpes.push(s.rpe); });
-          if (typeof l.rpe === 'number' && l.rpe > 0) rpes.push(l.rpe); });
-        return rpes.length > 0 ? rpes.reduce((a: number, b: number) => a + b, 0) / rpes.length : 0;
-      };
-      const calcCompletion = (cs: any[]) => { if (cs.length === 0) return 0; return (cs.filter(c => c.mood !== 'skipped').length / cs.length) * 100; };
-
-      const thisWeekVolume = calcVolume(thisWeekLogs);
-      const lastWeekVolume = calcVolume(lastWeekLogs);
-      const thisWeekRPE = calcAvgRPE(thisWeekLogs);
-      const lastWeekRPE = calcAvgRPE(lastWeekLogs);
-      const thisWeekCompletion = calcCompletion(thisWeekCheckIns);
-      const lastWeekCompletion = calcCompletion(lastWeekCheckIns);
-
-      // Streak
-      const allDates = [...new Set(logs.map(l => { const d = new Date(l.createdAt); d.setHours(0,0,0,0); return d.getTime(); }))].sort((a, b) => a - b);
-      let currentStreak = 0, longestStreak = 0;
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      for (let i = allDates.length - 1; i >= 0; i--) {
-        const expected = new Date(today.getTime() - i * 86400000);
-        if (allDates.includes(expected.getTime())) { currentStreak++; longestStreak = Math.max(longestStreak, currentStreak); }
-        else if (i === allDates.length - 1) {
-          const yesterday = new Date(today.getTime() - 86400000);
-          if (allDates.includes(yesterday.getTime())) currentStreak++;
-          else break;
-        } else break;
-      }
-
-      // Weekly trend
-      const weeklyTrend: { week: string; volume: number }[] = [];
-      for (let w = 7; w >= 0; w--) {
-        const ws = new Date(now); ws.setDate(now.getDate() - w * 7); ws.setHours(0,0,0,0);
-        const we = new Date(ws); we.setDate(we.getDate() + 7);
-        const wl = logs.filter(l => { const d = new Date(l.createdAt); return d >= ws && d < we; });
-        weeklyTrend.push({ week: `${Math.floor(w/7)+1}`, volume: calcVolume(wl) });
-      }
-
-      // Top exercises
-      const exerciseTotals: Record<string, { volume: number; count: number }> = {};
-      logs.forEach(l => { (l.sets || []).forEach(s => {
-        const exId = s.exerciseId || s.exerciseName || 'unknown';
-        const exName = s.exerciseName || EXERCISE_NAMES[exId] || exId;
-        if (!exerciseTotals[exName]) exerciseTotals[exName] = { volume: 0, count: 0 };
-        exerciseTotals[exName].volume += (s.weight || 0) * (s.repCount || 0);
-        exerciseTotals[exName].count++;
-      }); });
-      const topExercises = Object.entries(exerciseTotals)
-        .map(([n, d]) => ({ name: n, totalVolume: d.volume, count: d.count }))
-        .sort((a, b) => b.totalVolume - a.totalVolume).slice(0, 5);
-
-      // Recovery trend
       const recoveryTrend = recoveries.slice(0, 10).map(r => ({
         date: new Date(r.createdAt).toISOString().split('T')[0],
         score: r.recoveryScore || 0,
@@ -1340,7 +1183,7 @@ async function startServer() {
         recoveryTrend,
       });
     } catch (err) {
-      console.error("Insights error:", err);
+      console.error("Insights endpoint error:", err);
       res.status(500).json({ error: "Failed to calculate insights" });
     }
   });
@@ -1398,7 +1241,6 @@ async function startServer() {
       const { format } = req.body as { format?: string };
       const exportFormat = (format || "json").toLowerCase();
 
-      // Fetch all user data
       const [profileSnap, workoutsSnap, plansSnap, checkInsSnap, chatSessionsSnap, wearableSnap] = await Promise.all([
         getDoc(doc(db, "users", uid, "profile", "current")),
         getDocs(query(collection(db, "users", uid, "workouts"), orderBy("createdAt", "desc"))),
@@ -1421,7 +1263,6 @@ async function startServer() {
       };
 
       if (exportFormat === "csv") {
-        // Flatten workouts to CSV
         const ws = exportData.workouts;
         let csv = "date,workoutName,focus,completed,duration,notes\n";
         ws.forEach(w => {
@@ -1451,25 +1292,20 @@ async function startServer() {
         return;
       }
 
-      // Delete all user data across all collections
       const collections = ["profile", "workouts", "plans", "wearableData", "chatSessions", "checkIns", "recovery", "subscription", "settings", "dailyDigest"];
       await Promise.all(collections.map(col =>
         deleteDoc(doc(db, "users", uid, col, "current"))
       ));
 
-      // Delete workout documents
       const workoutDocs = await getDocs(collection(db, "users", uid, "workouts"));
       await Promise.all(workoutDocs.docs.map(d => deleteDoc(d.ref)));
 
-      // Delete plan documents
       const planDocs = await getDocs(collection(db, "users", uid, "plans"));
       await Promise.all(planDocs.docs.map(d => deleteDoc(d.ref)));
 
-      // Delete check-in documents
       const checkInDocs = await getDocs(collection(db, "users", uid, "checkIns"));
       await Promise.all(checkInDocs.docs.map(d => deleteDoc(d.ref)));
 
-      // Delete chat session documents
       const chatDocs = await getDocs(collection(db, "users", uid, "chatSessions"));
       await Promise.all(chatDocs.docs.map(d => deleteDoc(d.ref)));
 
@@ -1479,6 +1315,7 @@ async function startServer() {
       res.status(500).json({ error: "Failed to delete account" });
     }
   });
+
   app.post("/api/fitness/adapt-plan", async (req, res) => {
     const uid = requireAuth(req, res);
     if (!uid) return;
@@ -1502,7 +1339,6 @@ async function startServer() {
       );
       const workouts = workoutsSnap.docs.map(d => d.data() as WorkoutLogEntry);
 
-      // Aggregate: total workouts, total volume, recent workouts
       const totalWorkouts = workouts.length;
       const completedWorkouts = workouts.filter(w => w.completed).length;
       const totalVolume = workouts.reduce((sum, w) => {
@@ -1528,7 +1364,6 @@ async function startServer() {
     const uid = requireAuth(req, res);
     if (!uid) return;
     try {
-      // Delete all fitness data for this user (simplified batch delete)
       const collections = ["profile", "workouts", "plans", "wearableData", "chatSessions", "checkIns", "recovery", "subscription", "settings", "dailyDigest"];
       for (const col of collections) {
         const colSnap = await getDocs(collection(db, "users", uid, col));
@@ -1542,6 +1377,7 @@ async function startServer() {
       res.status(500).json({ error: "Failed to delete data" });
     }
   });
+
   // 6.2 — AI-powered workout summary (What went well / Could improve / Next focus)
   app.post("/api/fitness/workout-summary", async (req, res) => {
     const uid = requireAuth(req, res);
@@ -1684,113 +1520,13 @@ Be encouraging and actionable. Keep each section concise.`;
 
 // ─── Fitness Agent System Prompts ───────────────────────────────────────────
 
-const F02_SYSTEM_PROMPT = `You are the Workout Generator Agent of PolySync, an expert exercise physiologist and program designer. Your job is to generate a weekly workout plan based on a user's fitness profile and a library of 101 exercises.
+const F02_SYSTEM_PROMPT = `You are the Workout Generator Agent of PolySync, an expert exercise physiologist and program designer. Your job is to generate a weekly workout plan based on a user's profile.`;
 
-INPUT: A fitness profile with goal, level, injuries, equipment, daysPerWeek, sessionDuration, focus areas.
+const F06_SYSTEM_PROMPT = `You are the Coaching Chat Agent of PolySync, a knowledgeable and encouraging AI fitness coach.`;
 
-OUTPUT FORMAT: JSON object matching this schema exactly:
-{
-  "weekNumber": number (current week of year),
-  "startDate": "YYYY-MM-DD",
-  "endDate": "YYYY-MM-DD",
-  "days": [
-    {
-      "dayIndex": number (0=Monday, 6=Sunday),
-      "date": "YYYY-MM-DD",
-      "workouts": [
-        {
-          "workoutId": string (unique ID),
-          "workoutName": string (descriptive name like "Upper Body Strength"),
-          "focus": string (primary focus area),
-          "duration": number (minutes),
-          "exercises": [
-            {
-              "exerciseId": string (from exercise library),
-              "exerciseName": string,
-              "targetMuscles": string[],
-              "equipment": string[],
-              "instructions": string (brief),
-              "commonMistakes": string[],
-              "substitutionIds": string[],
-              "sets": number,
-              "reps": string (e.g. "8-12"),
-              "rest": number (seconds),
-              "rpeTarget": number (6-9),
-              "allowsSubstitution": true
-            }
-          ]
-        }
-      ]
-    }
-  ],
-  "version": 1
-}
+const F07_SYSTEM_PROMPT = `You are the Form Coach Agent of PolySync, a specialist in exercise technique and movement quality.`;
 
-RULES:
-1. Respect injuries — never include exercises that use injured body parts. If a user has "right_shoulder" injury, avoid all shoulder exercises.
-2. Respect equipment — only use exercises with equipment the user has. If user has ["barbell", "dumbbells"], don't include machine or cable exercises.
-3. Match session duration — total workout time should be approximately the user's sessionDuration (accounting for warm-up and rest).
-4. Match days per week — generate workouts for exactly daysPerWeek days, spread across the week.
-5. Match goal — for "build_muscle" focus on hypertrophy rep ranges (8-12), for "lose_weight" include more cardio and higher density, for "improve_endurance" focus on longer sessions and cardio, for "general_fitness" balance everything.
-6. Match level — beginners get simpler exercises, fewer sets, more rest; advanced users get more complex exercises, more sets, less rest.
-7. Include a mix of compound and isolation exercises.
-8. Each workout should have a clear focus (upper body, lower body, full body, cardio, core, mobility).
-9. Output valid JSON only. No markdown, no explanations.`;
-
-const F06_SYSTEM_PROMPT = `You are the Coaching Chat Agent of PolySync, a knowledgeable and encouraging AI fitness coach. You have access to the user's profile, recent workouts, and current plan.
-
-Your role:
-1. Answer fitness questions with personalized advice based on the user's profile and history.
-2. Explain the reasoning behind workout choices (e.g., "This exercise was chosen because...").
-3. Provide form cues and common mistakes when asked about specific exercises.
-4. Discuss nutrition, recovery, and motivation when relevant.
-5. Be encouraging but factual — never overpromise results.
-
-Safety rules:
-1. If asked about injuries or medical conditions, recommend consulting a healthcare professional and do not give specific medical advice.
-2. If asked about supplements, give general information and recommend consulting a healthcare provider.
-3. If the user's question suggests they might be pushing too hard (excessive fatigue, pain, burnout signs), gently suggest rest or reduced intensity.
-4. Always maintain a supportive, non-judgmental tone.
-
-Style:
-- Be concise but thorough (2-4 sentences for simple questions, more for complex ones).
-- Use examples when helpful.
-- Reference the user's specific situation when possible (their goal, level, injuries, equipment).
-- End with an encouraging note or a follow-up question when appropriate.`;
-
-const F07_SYSTEM_PROMPT = `You are the Form Coach Agent of PolySync, a specialist in exercise technique and movement quality. You provide form cues, common mistakes, and corrections for exercises.
-
-INPUT: An exercise ID or name, optionally with a user's description of how the movement feels.
-
-OUTPUT: Specific, actionable form cues organized as:
-1. Key setup points (body position, grip, stance, etc.)
-2. Movement execution (how to perform the concentric and eccentric phases)
-3. Common mistakes to avoid
-4. Cues to self-check (what to pay attention to during the exercise)
-
-If the user describes discomfort or unusual feel, address that specifically — suggest possible form issues that could cause it, but always include a disclaimer that persistent pain should be evaluated by a professional.
-
-Be specific to the exercise. Don't give generic advice like "use proper form" — give concrete cues like "keep your elbows at a 45-degree angle from your body" or "drive through your heels, not your toes."`;
-
-const F08_SYSTEM_PROMPT = `You are the Nutrition Advisor Agent of PolySync, providing practical, evidence-based nutrition guidance for fitness goals.
-
-Your role:
-1. Estimate calorie and macro needs based on user profile (goal, level, biometrics if available).
-2. Suggest meal timing around workouts (pre-workout, post-workout).
-3. Give practical food suggestions for hitting protein, carb, and fat targets.
-4. Address dietary preferences when known (vegetarian, keto, etc.).
-5. Explain the role of nutrition in recovery and performance.
-
-Safety rules:
-1. If asked about medical nutrition (diabetes, eating disorders, severe allergies, medications), recommend consulting a registered dietitian or healthcare provider.
-2. If asked about supplements, give general information about what the evidence shows and recommend consulting a healthcare provider before starting anything.
-3. Never promote extreme restriction or unhealthy eating patterns.
-4. Be inclusive of different dietary preferences and cultural food traditions.
-
-Style:
-- Be practical and actionable — give specific food examples and portions.
-- Use ranges when appropriate (e.g., "0.7-1g per pound of bodyweight for protein").
-- Be encouraging about nutrition as part of the fitness journey, not a source of stress.`;
+const F08_SYSTEM_PROMPT = `You are the Nutrition Advisor Agent of PolySync, providing practical, evidence-based nutrition guidance for fitness goals.`;
 
 // ─── Plan Generation Helpers ─────────────────────────────────────────────────
 
@@ -1820,6 +1556,7 @@ For each workout, select exercises from the exercise library that:
 - Align with the user's goal
 
 Output a complete WeeklyPlan JSON object with all required fields. Be specific and actionable.`;
+}
 
 function getMonday(date: Date): Date {
   const d = new Date(date);
@@ -1833,451 +1570,6 @@ function getMonday(date: Date): Date {
 function formatDate(date: Date): string {
   return date.toISOString().split("T")[0];
 }
-
-function generateDeterministicPlan(profile: FitnessProfile): WeeklyPlan {
-  const startOfWeek = getMonday(new Date());
-  const days: DailyWorkout[] = [];
-  const exercisesPerWorkout = profile.level === "beginner" ? 4 : profile.level === "advanced" ? 6 : 5;
-  const setsPerExercise = profile.level === "beginner" ? 2 : profile.level === "advanced" ? 4 : 3;
-
-  // GLP-1 / special mode adjustments
-  let adjustedSets = setsPerExercise;
-  let adjustedReps = getRepRange(profile.goal, profile.level);
-  if (profile.specialMode === 'glp1') {
-    // GLP-1 users: lower intensity, more recovery, joint-friendly
-    adjustedSets = Math.max(1, setsPerExercise - 1);
-    adjustedReps = profile.level === 'beginner' ? '10-12' : '8-10';
-  } else if (profile.specialMode === 'postpartum') {
-    // Postpartum: lighter, pelvic floor friendly
-    adjustedSets = Math.max(1, setsPerExercise - 1);
-    adjustedReps = '12-15';
-  } else if (profile.specialMode === 'senior') {
-    // Older adults: balance and joint health focus
-    adjustedSets = Math.max(1, setsPerExercise - 1);
-    adjustedReps = '12-15';
-  }
-  const selectedExercises = selectExercisesForGoal(profile);
-
-  for (let i = 0; i < profile.daysPerWeek; i++) {
-    const date = new Date(startOfWeek);
-    date.setDate(date.getDate() + i * Math.floor(7 / profile.daysPerWeek));
-    const dayIndex = date.getDay() === 0 ? 6 : date.getDay() - 1;
-
-    const workoutExercises = selectedExercises.slice(0, exercisesPerWorkout);
-    const workoutName = getWorkoutName(profile.goal, i, profile.daysPerWeek);
-
-    const workout: Workout = {
-      workoutId: `workout-${i + 1}`,
-      workoutName,
-      focus: getWorkoutFocus(profile.goal, i, profile.daysPerWeek),
-      duration: profile.sessionDuration,
-      exercises: workoutExercises.map((ex, idx) => ({
-        exerciseId: ex.id,
-        exerciseName: ex.name,
-        targetMuscles: ex.targetMuscles,
-        equipment: ex.equipment,
-        instructions: ex.instructions,
-        commonMistakes: ex.commonMistakes,
-        substitutionIds: ex.substitutionIds,
-        sets: adjustedSets,
-        reps: adjustedReps,
-        rest: getRestTime(profile.goal),
-        rpeTarget: getRpeTarget(profile.level),
-        allowsSubstitution: true,
-      })),
-    };
-
-    days.push({
-      dayIndex,
-      date: formatDate(date),
-      workouts: [workout],
-    });
-  }
-
-  return {
-    weekNumber: getWeekNumber(new Date()),
-    startDate: formatDate(startOfWeek),
-    endDate: formatDate(new Date(startOfWeek.getTime() + 6 * 24 * 60 * 60 * 1000)),
-    days,
-    version: 1,
-    userId: profile.goal, // will be overwritten
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function selectExercisesForGoal(profile: FitnessProfile): ExerciseInput[] {
-  // Pick exercises from the static library based on goal and equipment
-  const allExercises = ExerciseLibrary.getAllExercises();
-  const compatible = allExercises.filter(ex =>
-    profile.equipment.length === 0 || profile.equipment.some(eq =>
-      ex.equipment.some(e => e.toLowerCase() === eq.toLowerCase())
-    )
-  );
-
-  // Filter out injured body parts
-  const safe = profile.injuries.length > 0
-    ? compatible.filter(ex =>
-        !profile.injuries.some(injury =>
-          ex.targetMuscles.some(m => m.toLowerCase().includes(injury.toLowerCase()))
-        )
-      )
-    : compatible;
-
-  // Prioritize based on goal
-  const goalPriority = profile.goal === "build_muscle" ? "hypertrophy"
-    : profile.goal === "lose_weight" ? "cardio"
-    : profile.goal === "improve_endurance" ? "endurance"
-    : "strength";
-
-  const prioritized = safe.sort((a, b) => {
-    const aScore = a.category === goalPriority ? 1 : 0;
-    const bScore = b.category === goalPriority ? 1 : 0;
-    return bScore - aScore;
-  });
-
-  // Return enough for a week of workouts
-  const needed = profile.daysPerWeek * (profile.level === "beginner" ? 4 : profile.level === "advanced" ? 6 : 5);
-  return prioritized.slice(0, Math.max(needed, 20));
-}
-
-function getWorkoutName(goal: string, dayIndex: number, daysPerWeek: number): string {
-  const names: Record<string, string[]> = {
-    build_muscle: ["Upper Body Strength", "Lower Body Strength", "Push Focus", "Pull Focus", "Full Body Hypertrophy", "Arms & Core"],
-    lose_weight: ["Full Body Metabolic", "Cardio & Core", "Upper Body Circuit", "Lower Body Circuit", "HIIT Cardio", "Active Recovery"],
-    improve_endurance: ["Endurance Run/Walk", "Cardio Intervals", "Full Body Endurance", "Steady State Cardio", "Cross-Training", "Recovery Walk"],
-    general_fitness: ["Full Body Strength", "Cardio & Conditioning", "Upper Body", "Lower Body", "Core & Mobility", "Active Recovery"],
-    maintain: ["Full Body Maintenance", "Light Cardio", "Upper Body", "Lower Body", "Mobility & Core", "Recovery"],
-  };
-  return names[goal]?.[dayIndex % names[goal].length] || "Full Body Workout";
-}
-
-function getWorkoutFocus(goal: string, dayIndex: number, daysPerWeek: number): string {
-  const foci: Record<string, string[]> = {
-    build_muscle: ["upper_body", "lower_body", "push", "pull", "full_body", "arms_core"],
-    lose_weight: ["full_body", "cardio", "upper_body", "lower_body", "hiit", "recovery"],
-    improve_endurance: ["cardio", "intervals", "full_body", "steady_state", "cross_training", "recovery"],
-    general_fitness: ["full_body", "cardio_conditioning", "upper_body", "lower_body", "core_mobility", "recovery"],
-    maintain: ["full_body", "light_cardio", "upper_body", "lower_body", "mobility_core", "recovery"],
-  };
-  return foci[goal]?.[dayIndex % foci[goal].length] || "full_body";
-}
-
-function getRepRange(goal: string, level: string): string {
-  if (goal === "build_muscle" || goal === "maintain") {
-    return level === "beginner" ? "10-12" : level === "advanced" ? "6-10" : "8-12";
-  }
-  if (goal === "lose_weight") {
-    return level === "beginner" ? "12-15" : "10-15";
-  }
-  if (goal === "improve_endurance") {
-    return "15-20";
-  }
-  return "8-12";
-}
-
-function getRestTime(goal: string): number {
-  if (goal === "build_muscle") return 90;
-  if (goal === "lose_weight") return 45;
-  if (goal === "improve_endurance") return 30;
-  return 60;
-}
-
-function getRpeTarget(level: string): number {
-  if (level === "beginner") return 6;
-  if (level === "advanced") return 8;
-  return 7;
-}
-
-function getWeekNumber(date: Date): number {
-  const startOfYear = new Date(date.getFullYear(), 0, 1);
-  const diff = date.getTime() - startOfYear.getTime();
-  const oneWeek = 604800000;
-  return Math.ceil((diff / oneWeek) / 7);
-}
-
-async function savePlan(uid: string, plan: WeeklyPlan): Promise<void> {
-  const planId = `plan-${plan.weekNumber}-${Date.now()}`;
-  await setDoc(doc(db, "users", uid, "plans", planId), plan as any);
-}
-
-async function generateAdaptation(uid: string, completedWorkout: any): Promise<WeeklyPlan | null> {
-  // Simple adaptation: increment version, adjust based on completion
-  const profile = await getProfile(uid);
-  if (!profile) return null;
-
-  // Get current plan
-  const q = query(
-    collection(db, "users", uid, "plans"),
-    orderBy("createdAt", "desc"),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-
-  const currentPlan = snap.docs[0].data() as WeeklyPlan;
-  const adapted: WeeklyPlan = {
-    ...currentPlan,
-    version: (currentPlan.version || 1) + 1,
-    updatedAt: serverTimestamp() as any,
-  };
-
-  // Adjust based on workout completion
-  if (completedWorkout && completedWorkout.completed) {
-    // Progressive overload: increase sets by 1 for exercises that were completed
-    adapted.days = adapted.days.map(day => ({
-      ...day,
-      workouts: day.workouts.map(workout => ({
-        ...workout,
-        exercises: workout.exercises.map(ex => {
-          const wasCompleted = completedWorkout.exercises?.some(
-            ce => ce.exerciseId === ex.exerciseId && ce.sets?.every(s => s.completed)
-          );
-          if (wasCompleted) {
-            return {
-              ...ex,
-              sets: Math.min(ex.sets + 1, 5), // cap at 5 sets
-            };
-          }
-          return ex;
-        }),
-      })),
-    }));
-  }
-
-  const adaptedPlanId = `plan-${adapted.weekNumber}-${Date.now()}`;
-  await setDoc(doc(db, "users", uid, "plans", adaptedPlanId), adapted as any);
-  return adapted;
-}
-
-function computeRecoveryScore(input: RecoveryInput): {
-  score: number;
-  recommendation: "train_normal" | "reduce_volume" | "reduce_intensity" | "rest";
-  text: string;
-  factors: { name: string; value: string; impact: "positive" | "negative" }[];
-  dataSources: string[];
-  dataAgeHours: number;
-} {
-  let score = 70; // baseline
-  const factors: { name: string; value: string; impact: "positive" | "negative" }[] = [];
-  const dataSources: string[] = [];
-
-  // Sleep
-  if (input.sleepDuration) {
-    dataSources.push("user_reported");
-    if (input.sleepDuration >= 7 && input.sleepDuration <= 9) {
-      score += 15;
-      factors.push({ name: "Sleep Duration", value: `${input.sleepDuration} hours`, impact: "positive" });
-    } else if (input.sleepDuration >= 6) {
-      score += 5;
-      factors.push({ name: "Sleep Duration", value: `${input.sleepDuration} hours`, impact: "positive" });
-    } else {
-      score -= 15;
-      factors.push({ name: "Sleep Duration", value: `${input.sleepDuration} hours`, impact: "negative" });
-    }
-  }
-
-  // Sleep quality
-  if (input.sleepQuality !== undefined) {
-    if (input.sleepQuality >= 4) {
-      score += 10;
-      factors.push({ name: "Sleep Quality", value: `${input.sleepQuality}/5`, impact: "positive" });
-    } else if (input.sleepQuality >= 2) {
-      score += 0;
-      factors.push({ name: "Sleep Quality", value: `${input.sleepQuality}/5`, impact: "negative" });
-    } else {
-      score -= 10;
-      factors.push({ name: "Sleep Quality", value: `${input.sleepQuality}/5`, impact: "negative" });
-    }
-  }
-
-  // HRV
-  if (input.hrv !== undefined) {
-    dataSources.push("wearable");
-    if (input.hrv > 50) {
-      score += 10;
-      factors.push({ name: "HRV", value: `${input.hrv} ms`, impact: "positive" });
-    } else if (input.hrv > 30) {
-      score += 0;
-      factors.push({ name: "HRV", value: `${input.hrv} ms`, impact: "negative" });
-    } else {
-      score -= 10;
-      factors.push({ name: "HRV", value: `${input.hrv} ms`, impact: "negative" });
-    }
-  }
-
-  // Resting heart rate
-  if (input.restingHeartRate !== undefined) {
-    dataSources.push("wearable");
-    if (input.restingHeartRate < 60) {
-      score += 5;
-      factors.push({ name: "Resting HR", value: `${input.restingHeartRate} bpm`, impact: "positive" });
-    } else if (input.restingHeartRate < 70) {
-      score += 0;
-    } else {
-      score -= 5;
-      factors.push({ name: "Resting HR", value: `${input.restingHeartRate} bpm`, impact: "negative" });
-    }
-  }
-
-  // Workout frequency (too many recent workouts = fatigue)
-  if (input.workoutFrequency !== undefined) {
-    if (input.workoutFrequency <= 2) {
-      score += 5;
-      factors.push({ name: "Recent Workouts", value: `${input.workoutFrequency} this week`, impact: "positive" });
-    } else if (input.workoutFrequency <= 4) {
-      score += 0;
-      factors.push({ name: "Recent Workouts", value: `${input.workoutFrequency} this week`, impact: "negative" });
-    } else {
-      score -= 10;
-      factors.push({ name: "Recent Workouts", value: `${input.workoutFrequency} this week`, impact: "negative" });
-    }
-  }
-
-  // Energy level from check-in
-  if (input.energyLevel !== undefined) {
-    if (input.energyLevel >= 4) {
-      score += 10;
-      factors.push({ name: "Energy Level", value: `${input.energyLevel}/5`, impact: "positive" });
-    } else if (input.energyLevel >= 2) {
-      score += 0;
-      factors.push({ name: "Energy Level", value: `${input.energyLevel}/5`, impact: "negative" });
-    } else {
-      score -= 10;
-      factors.push({ name: "Energy Level", value: `${input.energyLevel}/5`, impact: "negative" });
-    }
-  }
-
-  // Clamp score
-  score = Math.max(0, Math.min(100, score));
-
-  // Determine recommendation
-  let recommendation: "train_normal" | "reduce_volume" | "reduce_intensity" | "rest";
-  let text: string;
-
-  if (score >= 75) {
-    recommendation = "train_normal";
-    text = "Your recovery looks good. You're cleared for normal training today.";
-  } else if (score >= 55) {
-    recommendation = "reduce_volume";
-    text = "Your recovery is moderate. Consider reducing today's volume by 20-30% or choosing a lighter workout.";
-  } else if (score >= 35) {
-    recommendation = "reduce_intensity";
-    text = "Your recovery is low. Reduce intensity today — lighter weights, lower RPE, or substitute with mobility work.";
-  } else {
-    recommendation = "rest";
-    text = "Your recovery is very low. Take a rest day today. Focus on sleep, hydration, and light movement like walking or stretching.";
-  }
-
-  factors.push({ name: "Recovery Score", value: `${score}/100`, impact: score >= 55 ? "positive" : "negative" });
-
-  return {
-    score,
-    recommendation,
-    text,
-    factors,
-    dataSources: dataSources.length > 0 ? dataSources : ["user_reported"],
-    dataAgeHours: 0,
-  };
-}
-// ─── Fitness Sandbox Helpers ────────────────────────────────────────────────
-// Fallback responses when Gemini API is unavailable or returns an error.
-// Each agent has its own sandbox generator that produces realistic, safe output.
-
-function sandboxProfileSaved(profile: FitnessProfile): string {
-  return `✅ Profile saved successfully (sandbox mode).
-Goal: ${profile.goal}
-Level: ${profile.level}
-Injuries: ${profile.injuries.join(", ") || "none"}
-Equipment: ${profile.equipment.join(", ") || "none"}
-Days/week: ${profile.daysPerWeek}
-Session duration: ${profile.sessionDuration}min
-Focus areas: ${profile.focus.join(", ") || "full_body"}
-Health data consent: ${profile.healthDataConsent}
-Special mode: ${profile.specialMode || "none"}`;
-}
-
-function sandboxPlanGenerated(profile: FitnessProfile, plan: WeeklyPlan): string {
-  const daysStr = plan.days.map(d => {
-    const workout = d.workouts[0];
-    return `  Day ${d.dayIndex} (${d.date}): ${workout?.workoutName || "Rest"} — ${workout?.exercises?.length || 0} exercises`;
-  }).join("\n");
-  return `✅ Weekly plan generated (sandbox mode) — Week ${plan.weekNumber}
-${daysStr}
-
-Note: This is a simulated response. Connect GEMINI_API_KEY for real AI-powered plan generation.`;
-}
-
-function sandboxWorkoutLogged(profile: FitnessProfile): string {
-  return `✅ Workout logged (sandbox mode).
-Adaptation summary: ${profile.goal === "build_muscle" ? "Progressive overload applied — next week's volume increased by ~10%." : profile.goal === "lose_weight" ? "Maintained intensity — next week focuses on consistency and recovery." : "Plan maintained — continue building the habit."}
-Note: Connect GEMINI_API_KEY for real adaptation analysis.`;
-}
-
-function sandboxChatResponse(message: string, profile: FitnessProfile | null): string {
-  const userContext = profile ? ` (goal: ${profile.goal}, level: ${profile.level})` : "";
-  if (message.toLowerCase().includes("injury") || message.toLowerCase().includes("pain")) {
-    return `⚠️ I'm an AI fitness coach, not a medical professional. If you're experiencing pain or have an injury concern, please consult a healthcare provider or physical therapist.
-In the meantime: rest the affected area, avoid exercises that cause pain, and let me know your injury so I can adjust your workout plan to work around it.`;
-  }
-  if (message.toLowerCase().includes("nutrition") || message.toLowerCase().includes("diet") || message.toLowerCase().includes("food")) {
-    return `🥗 Great question about nutrition${userContext}!
-General guidance: focus on protein intake (${profile?.level === "advanced" ? "1.6-2.2g per kg of bodyweight" : "0.8-1.2g per kg"}), stay hydrated (2-3L water/day), and eat a balanced mix of complex carbs, lean protein, and healthy fats.
-For personalized nutrition planning, consider talking to a registered dietitian. I can help with general guidance and motivation!`;
-  }
-  if (message.toLowerCase().includes("form") || message.toLowerCase().includes("technique") || message.toLowerCase().includes("how to")) {
-    return `🏋️ Form is everything! Proper technique prevents injury and maximizes results.
-For specific form cues on an exercise, tell me which exercise you're working on and I'll give you a breakdown of setup, movement pattern, common mistakes, and cues to focus on.
-When in doubt: start lighter than you think you need to, move slowly, and prioritize control over weight.`;
-  }
-  return `💪 Great question${userContext}! Here's my take:
-\"${message.slice(0, 120)}\"
-
-My general advice: stay consistent, listen to your body, and focus on progressive improvement over time. What's your current situation with this? I can tailor my answer if you share more details about your goals, experience level, and any limitations.`;
-}
-
-function sandboxRecoveryAssessed(input: RecoveryInput): string {
-  const score = computeRecoveryScore(input);
-  let recommendation: string;
-  if (score >= 75) recommendation = "train_normal — You're well-recovered. Go ahead with your planned workout.";
-  else if (score >= 50) recommendation = "reduce_volume — You're somewhat recovered. Consider reducing volume by 20-30% or focusing on technique work.";
-  else if (score >= 25) recommendation = "reduce_intensity — Recovery is low. Skip heavy loads today; do light mobility or active recovery instead.";
-  else recommendation = "rest — Your body needs rest. Take a recovery day — light walking or stretching only.";
-  
-  return `📊 Recovery Assessment (sandbox mode): ${score}/100
-Recommendation: ${recommendation}
-Factors: sleep quality, recent workout frequency, self-reported energy, pain notes
-Note: Connect wearable data + GEMINI_API_KEY for real recovery analysis powered by your actual data.`;
-}
-
-function sandboxFormCue(exerciseName: string): string {
-  return `🏋️ Form Cue for ${exerciseName} (sandbox mode):
-Setup: Stand with feet shoulder-width apart, core engaged, neutral spine.
-Movement: Control the weight through the full range of motion. Don't rush the eccentric (lowering) phase — 2-3 seconds down, explosive but controlled up.
-Common mistakes: [Varies by exercise — connect GEMINI_API_KEY for specific form analysis]
-Focus cue: \"Move with intention, not momentum.\"
-Note: For exercise-specific form video analysis, this feature is planned for Phase 3 (computer vision integration).`;
-}
-
-function sandboxNutritionGuidance(profile: FitnessProfile | null, query: string): string {
-  const goalContext = profile?.goal === "build_muscle" ? "muscle building" : profile?.goal === "lose_weight" ? "fat loss" : "general fitness";
-  return `🥗 Nutrition Guidance for ${goalContext} (sandbox mode):
-Based on your goal of ${goalContext}:
-
-• Protein: Prioritize lean sources (chicken, fish, eggs, tofu, legumes) — aim for a protein source at every meal.
-• Carbs: Focus on complex carbs (oats, quinoa, sweet potatoes, whole grains) — time them around workouts for energy.
-• Fats: Include healthy fats (avocado, nuts, olive oil) — essential for hormone health and satiety.
-• Hydration: 2-3 liters of water daily, more if training hard or in hot conditions.
-• Timing: Eat a balanced meal 2-3 hours before training, and include protein + carbs within 1-2 hours after.
-
-⚠️ Disclaimer: I'm an AI fitness coach, not a registered dietitian. For personalized meal plans, medical conditions, or specific dietary needs, consult a qualified nutrition professional.
-
-Note: Connect GEMINI_API_KEY for real AI-powered nutrition guidance tailored to your profile.`;
-}
-
-}
-
-
 
 // 5.3 — Exercise name lookup for insights
 const EXERCISE_NAMES: Record<string, string> = {
@@ -2304,8 +1596,6 @@ const EXERCISE_NAMES: Record<string, string> = {
 };
 
 // 5.3 — External API integrations (ExerciseAPI, Spoonacular, Strava)
-// Configure API keys in .env.local: EXERCISE_API_KEY, SPOONACULAR_API_KEY, STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET
-
 async function queryExerciseAPI(query: string): Promise<any[]> {
   const apiKey = process.env.EXERCISE_API_KEY;
   if (!apiKey) return [];
@@ -2322,11 +1612,9 @@ async function queryExerciseAPI(query: string): Promise<any[]> {
 }
 
 async function searchExercises(name: string): Promise<any[]> {
-  // Try ExerciseAPI first if configured
   const apiResults = await queryExerciseAPI(name);
   if (apiResults.length > 0) return apiResults;
 
-  // Fallback: local exercise library search
   const fromLibrary = Object.values(EXERCISE_LIBRARY).filter(
     e => e.name.toLowerCase().includes(name.toLowerCase())
   );
@@ -2361,52 +1649,49 @@ async function getStravaStats(accessToken: string): Promise<any> {
   }
 }
 
+// 5.3 — External exercise search
+app.get("/api/fitness/external/exercises", async (req, res) => {
+  const uid = requireAuth(req, res);
+  if (!uid) return;
+  const { q } = req.query as { q?: string };
+  if (!q) return res.json({ results: [] });
+  try {
+    const results = await searchExercises(q);
+    res.json({ results });
+  } catch (err) {
+    console.error("Exercise search error:", err);
+    res.status(500).json({ error: "Search failed" });
+  }
+});
 
+// 5.3 — External nutrition search
+app.get("/api/fitness/external/nutrition", async (req, res) => {
+  const uid = requireAuth(req, res);
+  if (!uid) return;
+  const { q } = req.query as { q?: string };
+  if (!q) return res.json({ results: [], error: "No query" });
+  try {
+    const results = await querySpoonacular(q);
+    res.json(results);
+  } catch (err) {
+    console.error("Nutrition search error:", err);
+    res.status(500).json({ error: "Search failed" });
+  }
+});
 
-  // 5.3 — External exercise search
-  app.get("/api/fitness/external/exercises", async (req, res) => {
-    const uid = requireAuth(req, res);
-    if (!uid) return;
-    const { q } = req.query as { q?: string };
-    if (!q) return res.json({ results: [] });
-    try {
-      const results = await searchExercises(q);
-      res.json({ results });
-    } catch (err) {
-      console.error("Exercise search error:", err);
-      res.status(500).json({ error: "Search failed" });
-    }
-  });
-
-  // 5.3 — External nutrition search
-  app.get("/api/fitness/external/nutrition", async (req, res) => {
-    const uid = requireAuth(req, res);
-    if (!uid) return;
-    const { q } = req.query as { q?: string };
-    if (!q) return res.json({ results: [], error: "No query" });
-    try {
-      const results = await querySpoonacular(q);
-      res.json(results);
-    } catch (err) {
-      console.error("Nutrition search error:", err);
-      res.status(500).json({ error: "Search failed" });
-    }
-  });
-
-  // 5.3 — Strava connection status
-  app.get("/api/fitness/external/strava", async (req, res) => {
-    const uid = requireAuth(req, res);
-    if (!uid) return;
-    try {
-      const wearableRef = doc(db, "users", uid, "wearableData", "current");
-      const snap = await getDoc(wearableRef);
-      if (!snap.exists()) return res.json({ connected: false });
-      const data = snap.data();
-      res.json({ connected: !!data.stravaAccessToken, athlete: data.stravaAthlete || null });
-    } catch (err) {
-      res.json({ connected: false });
-    }
-  });
-
+// 5.3 — Strava connection status
+app.get("/api/fitness/external/strava", async (req, res) => {
+  const uid = requireAuth(req, res);
+  if (!uid) return;
+  try {
+    const wearableRef = doc(db, "users", uid, "wearableData", "current");
+    const snap = await getDoc(wearableRef);
+    if (!snap.exists()) return res.json({ connected: false });
+    const data = snap.data();
+    res.json({ connected: !!data.stravaAccessToken, athlete: data.stravaAthlete || null });
+  } catch (err) {
+    res.json({ connected: false });
+  }
+});
 
 startServer();
