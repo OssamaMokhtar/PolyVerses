@@ -117,6 +117,17 @@ export function FitnessOnboarding({ currentUser, onComplete }: FitnessOnboarding
   const [weight, setWeight] = useState('');
   const [height, setHeight] = useState('');
 
+  // Step 8b - Special mode (GLP-1, etc.)
+  const [specialMode, setSpecialMode] = useState<string>('none');
+
+  const SPECIAL_MODES = [
+    { id: 'none', label: 'None', description: 'Standard fitness programming' },
+    { id: 'glp1', label: 'GLP-1 Medication', description: 'Taking GLP-1 agonists (Wegovy, Ozempic, Mounjaro, etc.) — modified intensity and recovery emphasis' },
+    { id: 'postpartum', label: 'Postpartum', description: 'Recently gave birth — modified exercises, pelvic floor focus, gradual progression' },
+    { id: 'injury_rehab', label: 'Injury Rehabilitation', description: 'Active injury rehab — modified exercises, avoid aggravating movements' },
+    { id: 'senior', label: 'Older Adult (65+)', description: 'Age-focused programming — balance, joint health, bone density emphasis' },
+  ];
+
   // Step 9 - Health consent
   const [healthDataConsent, setHealthDataConsent] = useState(false);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
@@ -217,7 +228,7 @@ export function FitnessOnboarding({ currentUser, onComplete }: FitnessOnboarding
         uid: currentUser.uid,
         email: currentUser.email || '',
         displayName: currentUser.displayName || '',
-        goal: selectedGoal asFitnessProfile['goal'],
+        goal: selectedGoal as FitnessProfile['goal'],
         level: selectedLevel as FitnessProfile['level'],
         injuries: injuries.filter(i => i !== 'none'),
         equipment: selectedEquipment,
@@ -231,6 +242,7 @@ export function FitnessOnboarding({ currentUser, onComplete }: FitnessOnboarding
         },
         healthDataConsent,
         disclaimerAccepted,
+        specialMode,
         createdAt: now,
         updatedAt: now,
       };
@@ -615,6 +627,47 @@ export function FitnessOnboarding({ currentUser, onComplete }: FitnessOnboarding
           </motion.div>
         )}
 
+        {/* Step 8b: Special Mode */}
+        {step === 8 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl p-6"
+          >
+            <h2 className="text-lg font-semibold mb-1">Special mode (optional)</h2>
+            <p className="text-[#71717A] text-sm mb-4">
+              Do you have any special considerations that affect your training?
+            </p>
+
+            <div className="grid gap-2">
+              {SPECIAL_MODES.map(mode => (
+                <label
+                  key={mode.id}
+                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                    specialMode === mode.id
+                      ? 'bg-[#00A3FF]/10 border-[#00A3FF]/40'
+                      : 'bg-[#16161A] border-[#27272A] hover:border-[#3f3f46]'
+                  }`}
+                >
+                  <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                    specialMode === mode.id ? 'border-[#00A3FF] bg-[#00A3FF]' : 'border-[#27272A]'
+                  }`}>
+                    {specialMode === mode.id && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">{mode.label}</div>
+                    <div className="text-xs text-[#71717A] mt-0.5">{mode.description}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
         {/* Step 9: Consent */}
         {step === 9 && (
           <motion.div
@@ -729,6 +782,7 @@ type FitnessProfile = {
   biometrics?: { age?: number; weight?: number; height?: number };
   healthDataConsent: boolean;
   disclaimerAccepted: boolean;
+  specialMode?: string;
   createdAt: number;
   updatedAt: number;
 };

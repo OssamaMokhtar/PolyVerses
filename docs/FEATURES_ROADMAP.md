@@ -1,6 +1,6 @@
 # PolySync — Features & Roadmap
 
-> **AI Fitness Coach · Feature Inventory & Phased Roadmap · v1.0 · 2026-09-11**
+> **AI Fitness Coach · Feature Inventory & Phased Roadmap · v1.1 · 2026-09-12**
 
 ---
 
@@ -264,4 +264,4 @@
 ---
 
 *Document version: 1.0 — Feature inventory and phased roadmap for PolySync.*
-*Updated: 2026-09-11*
+*Updated: 2026-09-12*

@@ -1501,7 +1501,7 @@ export function searchExercises(query: string): Exercise[] {
   );
 }
 
-export function getSubstitutes(exerciseId: string): Exercise[] {
+export function getSubstituteExercises(exerciseId: string): Exercise[] {
   const exercise = EXERCISE_BY_ID[exerciseId];
   if (!exercise) return [];
   return exercise.substitutions

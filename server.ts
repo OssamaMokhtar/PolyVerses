@@ -3,20 +3,257 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import fetch from "node-fetch";
 import { db } from "./src/firebase";
 import {
-  doc, getDoc, setDoc, serverTimestamp,
+  doc, getDoc, setDoc, serverTimestamp, deleteDoc,
   collection, addDoc, query, where, orderBy, getDocs, limit,
   Timestamp
 } from "firebase/firestore";
 import crypto from "crypto";
 import {
   FitnessProfile, WeeklyPlan, WorkoutLogEntry, CheckIn,
-  RecoveryAssessment, WorkoutExercise, ExerciseInput, PlanOutput,
-  RecoveryInput, ChatRequest, ChatResponse, NutritionRequest,
-  NutritionResponse, CheckInInput, HealthDataConsent
+  RecoveryAssessment, WorkoutExercise, ExerciseInputCompat, PlanOutputCompat,
+  RecoveryInput, CheckInInput, NutritionRequest,
+  NutritionResponse, ChatRequest, ChatResponse,
+  PlanExercise, PlanWorkout, PlanDay, DailyWorkday as DailyWorkout, Exercise, ModifiedExercise,
+  WearableDataPoint, RecoveryFactor, HealthDataConsent
 } from "./src/types";
-import { findExerciseSubstitution, ExerciseLibrary } from "./src/ExerciseLibrary";
+import { EXERCISE_LIBRARY, getSubstituteExercises } from "./src/ExerciseLibrary";
+
+// Week, date formatting helpers
+function getWeekNumber(date: Date): number {
+  const startOfYear = new Date(date.getFullYear(), 0, 1);
+  const diff = Math.floor((date.getTime() - startOfYear.getTime()) / 86400000);
+  return Math.ceil((diff + startOfYear.getDay() + 1) / 7);
+}
+
+function formatDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function computeRecoveryScore(input: RecoveryInput): {
+  score: number;
+  recommendation: "rest" | "train_normal" | "reduce_intensity" | "reduce_volume";
+  text: string;
+  factors: { name: string; value: string; impact: "positive" | "negative" }[];
+  dataSources: string[];
+  dataAgeHours: number;
+} {
+  let score = 50;
+  const factors: { name: string; value: string; impact: "positive" | "negative" }[] = [];
+
+  if (input.sleepDuration && input.sleepDuration >= 7) {
+    score += 20;
+    factors.push({ name: "sleep", value: `${input.sleepDuration}h`, impact: "positive" });
+  } else if (input.sleepDuration && input.sleepDuration < 6) {
+    score -= 15;
+    factors.push({ name: "sleep", value: `${input.sleepDuration}h`, impact: "negative" });
+  }
+
+  if (input.hrv && input.hrv > 60) {
+    score += 10;
+    factors.push({ name: "hrv", value: `${input.hrv}ms`, impact: "positive" });
+  }
+
+  if (input.restingHeartRate && input.restingHeartRate < 60) {
+    score += 5;
+    factors.push({ name: "resting_hr", value: `${input.restingHeartRate}bpm`, impact: "positive" });
+  } else if (input.restingHeartRate && input.restingHeartRate > 75) {
+    score -= 10;
+    factors.push({ name: "resting_hr", value: `${input.restingHeartRate}bpm`, impact: "negative" });
+  }
+
+  if (input.activeCalories && input.activeCalories > 500) {
+    factors.push({ name: "activity", value: `${input.activeCalories}cal`, impact: "positive" });
+  }
+
+  if (input.energyLevel && input.energyLevel < 3) {
+    score -= 10;
+    factors.push({ name: "energy", value: `${input.energyLevel}/5`, impact: "negative" });
+  }
+
+  if (score >= 80) {
+    return { score, recommendation: "train_normal", text: "You're well-recovered. Train normally.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  } else if (score >= 60) {
+    return { score, recommendation: "reduce_intensity", text: "Moderate recovery — consider lighter intensity today.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  } else if (score >= 40) {
+    return { score, recommendation: "active_recovery", text: "Low recovery — reduce volume or take active recovery.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  } else {
+    return { score, recommendation: "rest_day", text: "Poor recovery — rest today and focus on sleep and nutrition.",
+      factors, dataSources: [], dataAgeHours: 0 };
+  }
+}
+
+async function generateDeterministicPlan(profile: FitnessProfile): Promise<WeeklyPlan> {
+  const exercises = EXERCISE_LIBRARY;
+  const startOfWeek = new Date();
+  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const days: PlanDay[] = [];
+  const exercisesPerDay = profile.goal === "build_muscle" ? 5 :
+    profile.goal === "lose_weight" ? 6 :
+    profile.goal === "improve_endurance" ? 5 : 4;
+
+  for (let i = 0; i < profile.daysPerWeek; i++) {
+    const dayExercises: WorkoutExercise[] = exercises
+      .slice(0, exercisesPerDay)
+      .map((ex, idx) => ({
+        exerciseId: ex.exerciseId,
+        name: ex.name,
+        category: ex.category,
+        primaryMuscles: ex.primaryMuscles,
+        prescribedSets: idx < 2 ? 4 : 3,
+        prescribedReps: ex.primaryMuscles.length > 1 ? "8-12" : "12-15",
+        prescribedRestSeconds: 60 + idx * 10,
+        sets: [],
+      }));
+
+    days.push({
+      dayIndex: i,
+      date: startOfWeek.getTime() + i * 86400000,
+      dayLabel: ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][i] as string,
+      focus: profile.goal === "build_muscle" ? "Upper Body Strength" :
+             profile.goal === "lose_weight" ? "Full Body HIIT" :
+             profile.goal === "improve_endurance" ? "Cardio & Core" : "General Fitness",
+      workouts: [{
+        id: crypto.randomUUID(),
+        name: `Workout ${i + 1}`,
+        focus: profile.goal === "build_muscle" ? "Upper Body Strength" :
+               profile.goal === "lose_weight" ? "Full Body HIIT" :
+               profile.goal === "improve_endurance" ? "Cardio & Core" : "General Fitness",
+        estimatedDuration: profile.sessionDuration,
+        warmup: [],
+        mainExercises: dayExercises,
+        cooldown: [],
+      }],
+    });
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    userId: profile.uid ?? "unknown",
+    weekNumber: getWeekNumber(startOfWeek),
+    startDate: startOfWeek.getTime(),
+    version: 1,
+    days,
+    generatedBy: "F02",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+async function savePlan(uid: string, plan: WeeklyPlan): Promise<void> {
+  const planRef = doc(db, "users", uid, "plans", plan.id);
+  await setDoc(planRef, {
+    ...plan,
+    createdAt: plan.createdAt ?? serverTimestamp(),
+    updatedAt: plan.updatedAt ?? serverTimestamp(),
+  } as any, { merge: true });
+}
+
+function findExerciseSubstitution(
+  exerciseId: string,
+  preferredEquipment?: string[]
+): { exerciseId: string; name: string; targetMuscles: string[]; equipment: string[]; difficulty: string; reason: string }[] {
+  const substitutes: { exerciseId: string; name: string; targetMuscles: string[]; equipment: string[]; difficulty: string; reason: string }[] = [];
+  const exercise = EXERCISE_LIBRARY.find(e => e.exerciseId === exerciseId);
+  if (!exercise) return substitutes;
+
+  for (const ex of EXERCISE_LIBRARY) {
+    if (ex.exerciseId === exerciseId) continue;
+    if (preferredEquipment && !ex.equipment?.some(e => preferredEquipment.includes(e))) continue;
+    if (ex.primaryMuscles.some(m => exercise.primaryMuscles.includes(m))) {
+      substitutes.push({
+        exerciseId: ex.exerciseId,
+        name: ex.name,
+        targetMuscles: ex.primaryMuscles,
+        equipment: ex.equipment,
+        difficulty: ex.difficulty,
+        reason: "Target muscle overlap",
+      });
+    }
+  }
+
+  return substitutes.slice(0, 5);
+}
+
+async function generateAdaptation(
+  uid: string,
+  workout: WorkoutLogEntry
+): Promise<WeeklyPlan | null> {
+  try {
+    const planSnap = await getDocs(query(
+      collection(db, "users", uid, "plans"),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    ));
+    if (planSnap.empty) return null;
+
+    const plan = planSnap.docs[0].data() as WeeklyPlan;
+    const prevVersion = plan.version ?? 1;
+
+    // ── Adaptation logic ──────────────────────────────────────
+    if (!workout.completed) {
+      // SKIPPED: reduce volume next week (remove 1 exercise from each day)
+      plan.version = prevVersion + 1;
+      plan.adaptationReason = "Workout skipped — volume reduced for recovery";
+      plan.adaptedFromPlanId = plan.id;
+      plan.days = plan.days.map(day => {
+        if (day.workouts && day.workouts.length > 0) {
+          return {
+            ...day,
+            workouts: day.workouts.map(w => ({
+              ...w,
+              exercises: w.exercises.slice(0, Math.max(1, w.exercises.length - 1)),
+            })),
+          };
+        }
+        return day;
+      });
+    } else {
+      // COMPLETED: progressive overload (increase intensity if recovery is good)
+      const recoverySnap = await getDocs(query(
+        collection(db, "users", uid, "recovery"),
+        orderBy("assessedAt", "desc"),
+        limit(1)
+      ));
+      const lastRecovery = recoverySnap.docs[0]?.data() as any;
+      const recoveryScore = lastRecovery?.recoveryScore ?? 50;
+
+      plan.version = prevVersion + 1;
+      if (recoveryScore >= 60) {
+        plan.adaptationReason = `Workout completed — progressive overload (+5% intensity, recovery ${recoveryScore})`;
+        // Increase prescribed sets by 1 for exercises that were completed
+        plan.days = plan.days.map(day => ({
+          ...day,
+          workouts: day.workouts?.map(w => ({
+            ...w,
+            mainExercises: w.mainExercises?.map(ex => ({
+              ...ex,
+              sets: [...(ex.sets || []), { reps: 8, weight: 0, completed: false } as any],
+            })),
+          })),
+        }));
+      } else {
+        plan.adaptationReason = `Workout completed — maintained volume (recovery ${recoveryScore} < 60)`;
+      }
+      plan.adaptedFromPlanId = plan.id;
+    }
+
+    await savePlan(uid, plan);
+    return plan;
+  } catch {
+    return null;
+  }
+}
 
 dotenv.config();
 
@@ -79,57 +316,7 @@ async function startServer() {
 
   // --- API ROUTE FOR AGENT WORKFLOW EVALUATIONS ---
   app.post("/api/evaluate", async (req: express.Request, res: express.Response): Promise<void> => {
-    const { prompt, priority, role, agentType, userContext } = req.body;
-
-    const actualPriority = priority || "Medium";
-    const actualRole = role || "PM";
-    const inputPrompt = prompt || "Build structured Slack Integration feature";
-
-    // In case API Key is missing, generate high-fidelity simulated outputs so the app remains pristine
-    if (!ai) {
-      const sandboxResponse = generateSandboxResponse(agentType, inputPrompt, actualPriority, actualRole, userContext);
-      res.json({ text: sandboxResponse, sandbox: true });
-      return;
-    }
-
-    try {
-      let systemInstruction = "";
-      let modelPrompt = "";
-
-      if (agentType === "opportunity") {
-        systemInstruction = "You are the specialized Opportunity Planning Agent of PolyVerses v3.1. Master of RICE prioritization (Reach, Impact, Confidence, Effort). Analyze the product concept and output a clean Markdown summary containing a comparative RICE scorecard (scoring Reach, Impact scale 1-3, Confidence percentage, Effort in months, and final rounded RICE Score). Present it in a sleek markdown table followed by a 2-bullet point strategic recommendation. Keep it within 300 words.";
-        modelPrompt = `Evaluate this product idea: "${inputPrompt}". Role requested: ${actualRole}. Priority setting: ${actualPriority}. Construct the math metrics based on realistic product estimates.`;
-      } else if (agentType === "compliance") {
-        systemInstruction = "You are the automated Compliance Auditor Agent of PolyVerses v3.1. Expert in GDPR, CCPA, and global client-PII safeguards. Analyze the requested product concept and check for critical data handling compliance concerns. Output a Markdown document with three sections: 1. STRENGTHS (any compliance-positive structures), 2. WARNINGS (specific CCPA/GDPR/HIPAA telemetry or consent vulnerabilities found), and 3. DETAILED ACTIONABLE REMEDIATIONS (numbered steps to resolve, including Neo4j delete evictions and Pinecone text-hashing). Keep it highly professional and concise (under 300 words).";
-        modelPrompt = `Scrub compliance safeguards on this product request: "${inputPrompt}". User parameters: [Role: ${actualRole}, Priority: ${actualPriority}].`;
-      } else if (agentType === "prd") {
-        systemInstruction = "You are the advanced PRD Generation Agent of PolyVerses v3.1. You author exhaustive, production-grade Product Requirements Documents. Output an elegant, highly structured markdown PRD containing: 1. Executive goals, 2. Target Audiences (PM, Eng, Ops), 3. Success telemetry Metrics (with precise targets), 4. Architectural requirements (EKS microservices, Redis priority streams), and 5. Precise Service Level Agreements (SLAs on multi-region RTO/RPO limits). Do not use placeholders. Write actual concrete metrics and logic matching the concept. Keep it under 500 words.";
-        modelPrompt = `Generate the ultimate technical PRD for this concept: "${inputPrompt}". Active Role: ${actualRole}. Target priority weight: ${actualPriority}. Include robust engineering specifications.`;
-      } else if (agentType === "rollback") {
-        systemInstruction = "You are the critical Rollback Orchestrator Agent of PolyVerses v3.1. Monitor the performance matrix of the active deployment. Based on the user prompt, render a structured Markdown report highlighting simulated SRE telemetry health checks, error rates, p95 latencies, and explicit status representing whether the deployment is safe, at risk, or if an automated rollback workflow has been triggered. Keep it action-oriented and under 250 words.";
-        modelPrompt = `Perform release error budget analysis on the concept: "${inputPrompt}" running on Active US-East cloud instances.`;
-      } else {
-        // Default Router Orchestrator
-        systemInstruction = "You are the primary PolyVerses v3.1 Orchestrator Router. Guide the product leader on the multi-agent execution pipeline. Synthesize proactive insights regarding the input request and list how the 23-agent network will split duties to deliver. Mention the primary active-passive failover state for the database replica in us-east-1 and wewest-1. Keep it professional, motivating, and clean. Under 300 words.";
-        modelPrompt = `Analyze the initial signals for this idea: "${inputPrompt}". State how the PolyVerses second-brain starts the orchestration.`;
-      }
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: modelPrompt,
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.7,
-        }
-      });
-
-      const responseText = response.text || "Failed to retrieve generated response.";
-      res.json({ text: responseText, sandbox: false });
-    } catch (err: any) {
-      console.error("Gemini invocation error, reverting to sandbox generator:", err);
-      const fallback = generateSandboxResponse(agentType, inputPrompt, actualPriority, actualRole, userContext);
-      res.json({ text: fallback, error: err.message, sandbox: true });
-    }
+    res.status(410).json({ error: "This endpoint has been replaced by the PolySync fitness coaching API. Use /api/fitness/* endpoints instead." });
   });
 
   // ─── Legacy Fitness Layer (PolySync — separate product, retained for reference) ───
@@ -299,27 +486,27 @@ async function startServer() {
             plan = JSON.parse(text);
           } catch {
             console.error("Failed to parse Gemini plan response:", text);
-            plan = generateDeterministicPlan(profile);
+            plan = generateDeterministicPlan(profile as any);
           }
           plan.userId = uid;
-          plan.createdAt = serverTimestamp() as any;
-          plan.updatedAt = serverTimestamp() as any;
+          plan.createdAt = Date.now() as any;
+          plan.updatedAt = Date.now() as any;
           await savePlan(uid, plan);
           res.json({ plan, generatedBy: "gemini" });
         } catch (geminiErr) {
           console.error("Gemini plan generation failed, using deterministic fallback:", geminiErr);
-          const plan = generateDeterministicPlan(profile);
+          const plan = await generateDeterministicPlan(profile as any);
           plan.userId = uid;
-          plan.createdAt = serverTimestamp() as any;
-          plan.updatedAt = serverTimestamp() as any;
+          plan.createdAt = Date.now() as any;
+          plan.updatedAt = Date.now() as any;
           await savePlan(uid, plan);
           res.json({ plan, generatedBy: "deterministic" });
         }
       } else {
-        const plan = generateDeterministicPlan(profile);
+        const plan = await generateDeterministicPlan(profile as any);
         plan.userId = uid;
-        plan.createdAt = serverTimestamp() as any;
-        plan.updatedAt = serverTimestamp() as any;
+        plan.createdAt = Date.now() as any;
+        plan.updatedAt = Date.now() as any;
         await savePlan(uid, plan);
         res.json({ plan, generatedBy: "deterministic" });
       }
@@ -416,7 +603,7 @@ async function startServer() {
         return;
       }
       workout.userId = uid;
-      workout.completed = workout.completed ?? true;
+      workout.completed = workout.completed ?? false;
       workout.createdAt = serverTimestamp();
       const snap = await addDoc(collection(db, "users", uid, "workouts"), workout as any);
 
@@ -458,16 +645,18 @@ async function startServer() {
     }
   });
 
-  // F06 — Coaching Chat Agent
+  // F06 — Coaching Chat Agent (Phase 6: SSE streaming + follow-up chips + response timing + multilingual)
   app.post("/api/fitness/chat", async (req, res) => {
     const uid = requireAuth(req, res);
     if (!uid) return;
     try {
-      const { message, sessionId } = req.body as ChatRequest;
+      const { message, sessionId, lang } = req.body as ChatRequest;
       if (!message) {
         res.status(400).json({ error: "message is required" });
         return;
       }
+
+      const start = Date.now();
 
       // Get user context for the chat agent
       const profile = await getProfile(uid);
@@ -476,19 +665,121 @@ async function startServer() {
         context = `User profile: goal=${profile.goal}, level=${profile.level}, injuries=[${profile.injuries.join(", ")}], equipment=[${profile.equipment.join(", ")}], daysPerWeek=${profile.daysPerWeek}, sessionDuration=${profile.sessionDuration}min`;
       }
 
+      // Language instruction prefix
+      const langInstruction = lang && lang !== "en"
+        ? `Respond in ${lang}. Write all text in ${lang} including greetings, explanations, and follow-up questions.`
+        : "";
+
       let responseText: string;
+      let suggestions: string[] = [];
+
       if (ai) {
         try {
-          const fullPrompt = `Context: ${context}\n\nUser question: ${message}\n\nProvide a helpful, personalized fitness coaching response. Be encouraging but factual. If the question is about injuries or medical conditions, include a disclaimer that you are an AI fitness coach, not a medical professional, and recommend consulting a healthcare provider.`;
-          const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
-            contents: fullPrompt,
-            config: {
-              systemInstruction: F06_SYSTEM_PROMPT,
-              temperature: 0.7,
-            },
-          });
-          responseText = response.text || "Sorry, I couldn't generate a response.";
+          const fullPrompt = `${langInstruction ? langInstruction + "\n\n" : ""}Context: ${context}\n\nUser question: ${message}\n\nProvide a helpful, personalized fitness coaching response. Be encouraging but factual. End with 2-3 follow-up questions the user might want to ask next, formatted as a JSON array of short strings (e.g. ["How many sets should I do?", "What weight should I use?"]). Only include the JSON array at the very end of your response, nothing after it. If the question is about injuries or medical conditions, include a disclaimer that you are an AI fitness coach, not a medical professional, and recommend consulting a healthcare provider.`;
+
+          // Try streaming first if client supports it
+          const streamMode = req.query.stream === 'true';
+
+          if (streamMode) {
+            // SSE streaming mode
+            (res as any).writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+            });
+
+            let fullText = '';
+            let lastChunkTime = start;
+
+            const stream = await ai.models.generateContentStream({
+              model: "gemini-3.5-flash",
+              contents: fullPrompt,
+              config: {
+                systemInstruction: F06_SYSTEM_PROMPT,
+                temperature: 0.7,
+              },
+            });
+
+            for await (const chunk of stream) {
+              const text = chunk.text || '';
+              fullText += text;
+              const now = Date.now();
+              res.write(`data: ${JSON.stringify({ text, delta: text, elapsed: now - start })}\n\n`);
+              lastChunkTime = now;
+            }
+
+            // Extract suggestions from the last lines (JSON array)
+            const suggestionMatch = fullText.match(/\[[\s\S]*?\]/);
+            if (suggestionMatch) {
+              try {
+                suggestions = JSON.parse(suggestionMatch[0]);
+              } catch {
+                // Fall back: extract sentences that look like questions
+                const sentences = fullText.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 10 && s.endsWith('?'));
+                suggestions = sentences.slice(0, 3);
+              }
+            }
+
+            const elapsed = Date.now() - start;
+            res.write(`data: ${JSON.stringify({ done: true, response: fullText, suggestions, responseTime: elapsed })}\n\n`);
+            res.end();
+
+            // Save to Firestore after streaming completes
+            const messageData = {
+              id: crypto.randomUUID(),
+              role: "user" as const,
+              content: message,
+              timestamp: serverTimestamp(),
+              agentId: "F06",
+            };
+            const assistantData = {
+              id: crypto.randomUUID(),
+              role: "assistant" as const,
+              content: fullText,
+              timestamp: serverTimestamp(),
+              agentId: "F06",
+            };
+
+            if (sessionId) {
+              await setDoc(doc(db, "users", uid, "chatSessions", sessionId), {
+                createdAt: serverTimestamp(),
+                lastMessageAt: serverTimestamp(),
+                messages: [messageData, assistantData],
+              } as any, { merge: true });
+            } else {
+              await addDoc(collection(db, "users", uid, "chatSessions"), {
+                createdAt: serverTimestamp(),
+                lastMessageAt: serverTimestamp(),
+                messages: [messageData, assistantData],
+              } as any);
+            }
+
+            return;
+          } else {
+            // Non-streaming mode: return full response with suggestions + timing
+            const response = await ai.models.generateContent({
+              model: "gemini-3.5-flash",
+              contents: fullPrompt,
+              config: {
+                systemInstruction: F06_SYSTEM_PROMPT,
+                temperature: 0.7,
+              },
+            });
+            responseText = response.text || "Sorry, I couldn't generate a response.";
+
+            // Extract suggestions from response
+            const suggestionMatch = responseText.match(/\[[\s\S]*?\]/);
+            if (suggestionMatch) {
+              try {
+                suggestions = JSON.parse(suggestionMatch[0]);
+                // Remove the JSON array from the response text
+                responseText = responseText.slice(0, suggestionMatch.index).trim();
+              } catch {
+                const sentences = responseText.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 10 && s.endsWith('?'));
+                suggestions = sentences.slice(0, 3);
+              }
+            }
+          }
         } catch (geminiErr) {
           console.error("Gemini chat failed:", geminiErr);
           responseText = `I'm here to help with your fitness journey! Could you tell me more about what you're looking for? (Gemini API unavailable — using fallback)`;
@@ -496,6 +787,8 @@ async function startServer() {
       } else {
         responseText = `I'm here to help with your fitness journey! Could you tell me more about what you're looking for? (Gemini API not configured — using sandbox)`;
       }
+
+      const elapsed = Date.now() - start;
 
       // Save message to chat session
       const messageData = {
@@ -527,7 +820,13 @@ async function startServer() {
         } as any);
       }
 
-      res.json({ response: responseText, sandbox: !ai });
+      res.json({
+        reply: responseText,
+        agentId: "F06",
+        suggestions: suggestions.length > 0 ? suggestions : undefined,
+        responseTime: elapsed,
+        sandbox: !ai,
+      });
     } catch (err) {
       console.error("F06 chat error:", err);
       res.status(500).json({ error: "Failed to process chat" });
@@ -624,7 +923,627 @@ async function startServer() {
     }
   });
 
-  // F05 — Manual plan adaptation trigger
+  // F10 — Wearable Data Ingest Agent (HealthKit + Google Fit)
+  // Note: Web HealthKit access requires Safari 15+ on iOS 15+/macOS 11+.
+  // Google Fit requires OAuth 2.0 flow via Google Identity Services.
+  // Both are stubbed here; full implementations require native companion app
+  // or browser-specific APIs that are only available in secure contexts.
+
+  app.post("/api/fitness/wearable/ingest", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { source, data } = req.body as {
+        source: 'healthkit' | 'googlefit' | 'strava' | 'garmin' | 'whoop' | 'oura';
+        data: WearableDataPoint[];
+      };
+      if (!source || !data || !Array.isArray(data)) {
+        res.status(400).json({ error: "source and data array are required" });
+        return;
+      }
+
+      // Validate and normalize
+      const normalized: WearableDataPoint[] = data
+        .filter((d: any) => d.timestamp && typeof d.timestamp === 'number')
+        .map((d: any, i: number) => ({
+          id: d.id || crypto.randomUUID(),
+          userId: uid,
+          source,
+          timestamp: d.timestamp,
+          sleepDuration: d.sleepDuration,
+          sleepStartTime: d.sleepStartTime,
+          sleepEndTime: d.sleepEndTime,
+          sleepStages: d.sleepStages,
+          restingHeartRate: d.restingHeartRate,
+          hrv: d.hrv,
+          heartRateZones: d.heartRateZones,
+          steps: d.steps,
+          activeCalories: d.activeCalories,
+          activeMinutes: d.activeMinutes,
+          workoutSessions: d.workoutSessions,
+          createdAt: Date.now(),
+        }));
+
+      // Save to Firestore
+      const userWearableRef = doc(db, "users", uid, "wearableData", "points");
+      const existingSnap = await getDoc(userWearableRef);
+      const existingPoints: WearableDataPoint[] = existingSnap.exists() ? (existingSnap.data().points || []) : [];
+      const merged = [...existingPoints, ...normalized]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 500);
+      await setDoc(userWearableRef, { points: merged, updatedAt: Date.now() }, { merge: true });
+
+      // Update summary
+      const summaryRef = doc(db, "users", uid, "wearableData", "current");
+      await setDoc(summaryRef, {
+        source,
+        lastIngestedAt: Date.now(),
+        dataAgeHours: 0,
+        pointCount: merged.length,
+      } as any, { merge: true });
+
+      res.json({
+        success: true,
+        pointCount: normalized.length,
+        totalPoints: merged.length,
+        sandbox: true,
+      });
+    } catch (err) {
+      console.error("F10 wearable ingest error:", err);
+      res.status(500).json({ error: "Failed to ingest wearable data" });
+    }
+  });
+
+  app.get("/api/fitness/wearable", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const wearableRef = doc(db, "users", uid, "wearableData", "current");
+      const wearableSnap = await getDoc(wearableRef);
+      if (!wearableSnap.exists()) {
+        res.json({ connected: false, source: null, dataAgeHours: null, pointCount: 0 });
+        return;
+      }
+      const data = wearableSnap.data();
+      const pointsRef = doc(db, "users", uid, "wearableData", "points");
+      const pointsSnap = await getDoc(pointsRef);
+      const pointCount = pointsSnap.exists() ? (pointsSnap.data().points?.length || 0) : 0;
+      res.json({
+        connected: true,
+        source: data.source,
+        lastIngestedAt: data.lastIngestedAt,
+        dataAgeHours: data.dataAgeHours,
+        pointCount,
+      });
+    } catch (err) {
+      console.error("F10 wearable read error:", err);
+      res.status(500).json({ error: "Failed to read wearable status" });
+    }
+  });
+
+  app.post("/api/fitness/wearable/disconnect", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { source } = req.body as { source: string };
+      res.json({ success: true, disconnected: source });
+    } catch (err) {
+      console.error("F10 wearable disconnect error:", err);
+      res.status(500).json({ error: "Failed to disconnect wearable" });
+    }
+  });
+
+  // 3.3 — Streaks & Consistency
+  app.get("/api/fitness/streaks", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const workoutsRef = collection(db, "users", uid, "workouts");
+      const workoutsSnap = await getDocs(workoutsRef);
+      const logs: any[] = [];
+      workoutsSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.completed) {
+          logs.push({ date: data.createdAt || data.date, workoutName: data.workoutName });
+        }
+      });
+
+      // Calculate streak
+      const workoutDates = [...new Set(logs.map(l => {
+        const d = new Date(l.date);
+        return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      }))].sort().reverse();
+
+      let streak = 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let checkDate = new Date(today);
+
+      for (const dateStr of workoutDates) {
+        const logDate = new Date(dateStr + 'T00:00:00');
+        const diffDays = Math.floor((today.getTime() - logDate.getTime()) / 86400000);
+        if (diffDays <= 1 && diffDays >= 0) {
+          streak++;
+          today.setDate(today.getDate() - 1);
+        } else if (diffDays > 1) {
+          break;
+        }
+      }
+
+      // Longest streak
+      let longestStreak = 0;
+      let currentStreak = 0;
+      const sortedDates = [...new Set(logs.map(l => {
+        const d = new Date(l.date);
+        return d.getTime();
+      }))].sort((a, b) => a - b);
+
+      for (let i = 0; i < sortedDates.length; i++) {
+        if (i === 0 || sortedDates[i] - sortedDates[i - 1] === 86400000) {
+          currentStreak++;
+        } else {
+          longestStreak = Math.max(longestStreak, currentStreak);
+          currentStreak = 1;
+        }
+      }
+      longestStreak = Math.max(longestStreak, currentStreak);
+
+      // Total workouts
+      const totalWorkouts = logs.length;
+      const last7Days = logs.filter(l => {
+        const d = new Date(l.date);
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 7);
+        return d >= cutoff;
+      }).length;
+
+      res.json({
+        streakDays: streak,
+        longestStreakDays: longestStreak,
+        totalWorkouts,
+        workoutsLast7Days: last7Days,
+        sandbox: true,
+      });
+    } catch (err) {
+      console.error("Streaks endpoint error:", err);
+      res.status(500).json({ error: "Failed to calculate streaks" });
+    }
+  });
+
+  // 5.2 — Personalized insights dashboard
+  app.get("/api/fitness/insights", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      // Fetch all data in parallel
+      const [profileSnap, checksSnap, logsSnap, recoverySnap] = await Promise.all([
+        getDoc(doc(db, "users", uid, "profile", "current")),
+        getDocs(query(collection(db, "users", uid, "checkIns"), orderBy("createdAt", "desc"), limit(20))),
+        getDocs(query(collection(db, "users", uid, "workouts"), orderBy("createdAt", "desc"))),
+        getDocs(query(collection(db, "users", uid, "recovery"), orderBy("createdAt", "desc"))),
+      ]);
+
+      const profile = profileSnap.exists() ? (profileSnap.data() as any) : {};
+      const checks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const logs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const recoveries = recoverySnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Time periods
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(endOfWeek.getDate() + 7);
+
+      const startLastWeek = new Date(startOfWeek);
+      startLastWeek.setDate(startLastWeek.getDate() - 7);
+
+      const thisWeekLogs = logs.filter(l => {
+        const d = new Date(l.createdAt);
+        return d >= startOfWeek && d < endOfWeek;
+      });
+      const lastWeekLogs = logs.filter(l => {
+        const d = new Date(l.createdAt);
+        return d >= startLastWeek && d < startOfWeek;
+      });
+
+      const thisWeekCheckIns = checks.filter(c => {
+        const d = new Date(c.createdAt);
+        return d >= startOfWeek && d < endOfWeek;
+      });
+      const lastWeekCheckIns = checks.filter(c => {
+        const d = new Date(c.createdAt);
+        return d >= startLastWeek && d < startOfWeek;
+      });
+
+      // Volume calculation
+      const calcVolume = (workoutLogs: any[]) => {
+        let total = 0;
+        workoutLogs.forEach(l => {
+          const sets = l.sets || [];
+          sets.forEach(s => {
+            total += (s.weight || 0) * (s.repCount || 0);
+          });
+        });
+        return total;
+      };
+
+      const thisWeekVolume = calcVolume(thisWeekLogs);
+      const lastWeekVolume = calcVolume(lastWeekLogs);
+
+      // RPE average
+      const calcAvgRPE = (workoutLogs: any[]) => {
+        const rpes: number[] = [];
+        workoutLogs.forEach(l => {
+          const sets = l.sets || [];
+          sets.forEach(s => {
+            if (typeof s.rpe === 'number' && s.rpe > 0) rpes.push(s.rpe);
+          });
+          if (typeof l.rpe === 'number' && l.rpe > 0) rpes.push(l.rpe);
+        });
+        return rpes.length > 0 ? rpes.reduce((a, b) => a + b, 0) / rpes.length : 0;
+      };
+
+      const thisWeekRPE = calcAvgRPE(thisWeekLogs);
+      const lastWeekRPE = calcAvgRPE(lastWeekLogs);
+
+      // Completion rate
+      const calcCompletion = (checks: any[]) => {
+        if (checks.length === 0) return 0;
+        const completed = checks.filter(c => c.mood !== 'skipped').length;
+        return (completed / checks.length) * 100;
+      };
+
+      const thisWeekCompletion = calcCompletion(thisWeekCheckIns);
+      const lastWeekCompletion = calcCompletion(lastWeekCheckIns);
+
+      // Streak calculation
+      const allDates = [...new Set(logs.map(l => {
+        const d = new Date(l.createdAt);
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+      }))].sort((a, b) => a - b);
+
+      let currentStreak = 0;
+      let longestStreak = 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (let i = allDates.length - 1; i >= 0; i--) {
+        const expected = new Date(today.getTime() - i * 86400000);
+        if (allDates.includes(expected.getTime())) {
+          currentStreak++;
+          longestStreak = Math.max(longestStreak, currentStreak);
+        } else if (i === allDates.length - 1) {
+          // Allow for yesterday if today is missing
+          const yesterday = new Date(today.getTime() - 86400000);
+          if (allDates.includes(yesterday.getTime())) {
+            currentStreak++;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+
+      // Weekly volume trend (last 8 weeks)
+      const weeklyTrend = [];
+      for (let w = 7; w >= 0; w--) {
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - w * 7);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 7);
+
+        const weekLogs = logs.filter(l => {
+          const d = new Date(l.createdAt);
+          return d >= weekStart && d < weekEnd;
+        });
+
+        const weekNum = Math.floor(w / 7) + 1;
+        const weekLabel = `${weekNum}`;
+        weeklyTrend.push({
+          week: weekLabel,
+          volume: calcVolume(weekLogs),
+        });
+      }
+
+      // Top exercises
+      const exerciseTotals: Record<string, { volume: number; count: number }> = {};
+      logs.forEach(l => {
+        const sets = l.sets || [];
+        sets.forEach(s => {
+          const exId = s.exerciseId || s.exerciseName || 'unknown';
+          const exName = s.exerciseName || EXERCISE_NAMES[exId] || exId;
+          if (!exerciseTotals[exName]) exerciseTotals[exName] = { volume: 0, count: 0 };
+          exerciseTotals[exName].volume += (s.weight || 0) * (s.repCount || 0);
+          exerciseTotals[exName].count++;
+        });
+      });
+
+      const topExercises = Object.entries(exerciseTotals)
+        .map(([name, data]) => ({ name, totalVolume: data.volume, count: data.count }))
+        .sort((a, b) => b.totalVolume - a.totalVolume)
+        .slice(0, 5);
+
+      // Recovery trend
+      const recoveryTrend = recoveries.slice(0, 10).map(r => ({
+        date: new Date(r.createdAt).toISOString().split('T')[0],
+        score: r.recoveryScore || 0,
+      }));
+
+      const numWeeks = Math.max(1, Math.floor(logs.length / 12));
+
+      res.json({
+        periodLabel: `Last 7 days vs prior 7 days`,
+        workoutsThisPeriod: thisWeekLogs.length,
+        workoutsLastPeriod: lastWeekLogs.length,
+        completionRate: thisWeekCompletion,
+        completionRateLast: lastWeekCompletion,
+        totalVolume: thisWeekVolume,
+        totalVolumeLast: lastWeekVolume,
+        avgRPE: thisWeekRPE,
+        avgRPELast: lastWeekRPE,
+        currentStreak,
+        longestStreak,
+        weeklyVolumeTrend: weeklyTrend.filter(w => w.volume > 0),
+        topExercises,
+        recoveryTrend,
+      });
+    } catch (err) {
+      console.error("Insights endpoint error:", err);
+      res.status(500).json({ error: "Failed to calculate insights" });
+    }
+  });
+
+  
+  // 5.2 — Personalized insights dashboard
+  app.get("/api/fitness/insights", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const [profileSnap, checksSnap, logsSnap, recoverySnap] = await Promise.all([
+        getDoc(doc(db, "users", uid, "profile", "current")),
+        getDocs(query(collection(db, "users", uid, "checkIns"), orderBy("createdAt", "desc"), limit(20))),
+        getDocs(query(collection(db, "users", uid, "workouts"), orderBy("createdAt", "desc"))),
+        getDocs(query(collection(db, "users", uid, "recovery"), orderBy("createdAt", "desc"))),
+      ]);
+
+      const profile = profileSnap.exists() ? (profileSnap.data() as any) : {};
+      const checks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const logs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const recoveries = recoverySnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(endOfWeek.getDate() + 7);
+      const startLastWeek = new Date(startOfWeek);
+      startLastWeek.setDate(startLastWeek.getDate() - 7);
+
+      const thisWeekLogs = logs.filter(l => { const d = new Date(l.createdAt); return d >= startOfWeek && d < endOfWeek; });
+      const lastWeekLogs = logs.filter(l => { const d = new Date(l.createdAt); return d >= startLastWeek && d < startOfWeek; });
+      const thisWeekCheckIns = checks.filter(c => { const d = new Date(c.createdAt); return d >= startOfWeek && d < endOfWeek; });
+      const lastWeekCheckIns = checks.filter(c => { const d = new Date(c.createdAt); return d >= startLastWeek && d < startOfWeek; });
+
+      const calcVolume = (wl: any[]) => { let t = 0; wl.forEach(l => { (l.sets || []).forEach(s => { t += (s.weight || 0) * (s.repCount || 0); }); }); return t; };
+      const calcAvgRPE = (wl: any[]) => {
+        const rpes: number[] = [];
+        wl.forEach(l => { (l.sets || []).forEach(s => { if (typeof s.rpe === 'number' && s.rpe > 0) rpes.push(s.rpe); });
+          if (typeof l.rpe === 'number' && l.rpe > 0) rpes.push(l.rpe); });
+        return rpes.length > 0 ? rpes.reduce((a: number, b: number) => a + b, 0) / rpes.length : 0;
+      };
+      const calcCompletion = (cs: any[]) => { if (cs.length === 0) return 0; return (cs.filter(c => c.mood !== 'skipped').length / cs.length) * 100; };
+
+      const thisWeekVolume = calcVolume(thisWeekLogs);
+      const lastWeekVolume = calcVolume(lastWeekLogs);
+      const thisWeekRPE = calcAvgRPE(thisWeekLogs);
+      const lastWeekRPE = calcAvgRPE(lastWeekLogs);
+      const thisWeekCompletion = calcCompletion(thisWeekCheckIns);
+      const lastWeekCompletion = calcCompletion(lastWeekCheckIns);
+
+      // Streak
+      const allDates = [...new Set(logs.map(l => { const d = new Date(l.createdAt); d.setHours(0,0,0,0); return d.getTime(); }))].sort((a, b) => a - b);
+      let currentStreak = 0, longestStreak = 0;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      for (let i = allDates.length - 1; i >= 0; i--) {
+        const expected = new Date(today.getTime() - i * 86400000);
+        if (allDates.includes(expected.getTime())) { currentStreak++; longestStreak = Math.max(longestStreak, currentStreak); }
+        else if (i === allDates.length - 1) {
+          const yesterday = new Date(today.getTime() - 86400000);
+          if (allDates.includes(yesterday.getTime())) currentStreak++;
+          else break;
+        } else break;
+      }
+
+      // Weekly trend
+      const weeklyTrend: { week: string; volume: number }[] = [];
+      for (let w = 7; w >= 0; w--) {
+        const ws = new Date(now); ws.setDate(now.getDate() - w * 7); ws.setHours(0,0,0,0);
+        const we = new Date(ws); we.setDate(we.getDate() + 7);
+        const wl = logs.filter(l => { const d = new Date(l.createdAt); return d >= ws && d < we; });
+        weeklyTrend.push({ week: `${Math.floor(w/7)+1}`, volume: calcVolume(wl) });
+      }
+
+      // Top exercises
+      const exerciseTotals: Record<string, { volume: number; count: number }> = {};
+      logs.forEach(l => { (l.sets || []).forEach(s => {
+        const exId = s.exerciseId || s.exerciseName || 'unknown';
+        const exName = s.exerciseName || EXERCISE_NAMES[exId] || exId;
+        if (!exerciseTotals[exName]) exerciseTotals[exName] = { volume: 0, count: 0 };
+        exerciseTotals[exName].volume += (s.weight || 0) * (s.repCount || 0);
+        exerciseTotals[exName].count++;
+      }); });
+      const topExercises = Object.entries(exerciseTotals)
+        .map(([n, d]) => ({ name: n, totalVolume: d.volume, count: d.count }))
+        .sort((a, b) => b.totalVolume - a.totalVolume).slice(0, 5);
+
+      // Recovery trend
+      const recoveryTrend = recoveries.slice(0, 10).map(r => ({
+        date: new Date(r.createdAt).toISOString().split('T')[0],
+        score: r.recoveryScore || 0,
+      }));
+
+      res.json({
+        periodLabel: "Last 7 days vs prior 7 days",
+        workoutsThisPeriod: thisWeekLogs.length,
+        workoutsLastPeriod: lastWeekLogs.length,
+        completionRate: thisWeekCompletion,
+        completionRateLast: lastWeekCompletion,
+        totalVolume: thisWeekVolume,
+        totalVolumeLast: lastWeekVolume,
+        avgRPE: thisWeekRPE,
+        avgRPELast: lastWeekRPE,
+        currentStreak,
+        longestStreak,
+        weeklyVolumeTrend: weeklyTrend.filter(w => w.volume > 0),
+        topExercises,
+        recoveryTrend,
+      });
+    } catch (err) {
+      console.error("Insights error:", err);
+      res.status(500).json({ error: "Failed to calculate insights" });
+    }
+  });
+
+  // 3.4 — Notification preferences
+  app.post("/api/fitness/settings/notifications", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { dailyDigestTime, workoutReminders, checkInReminders } = req.body as {
+        dailyDigestTime?: string;
+        workoutReminders?: boolean;
+        checkInReminders?: boolean;
+      };
+      const settingsRef = doc(db, "users", uid, "settings", "notifications");
+      await setDoc(settingsRef, {
+        dailyDigestTime: dailyDigestTime || "08:00",
+        workoutReminders: workoutReminders !== false,
+        checkInReminders: checkInReminders !== false,
+        updatedAt: Date.now(),
+      } as any, { merge: true });
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Notification settings error:", err);
+      res.status(500).json({ error: "Failed to save notification settings" });
+    }
+  });
+
+  app.get("/api/fitness/settings/notifications", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const settingsRef = doc(db, "users", uid, "settings", "notifications");
+      const settingsSnap = await getDoc(settingsRef);
+      if (settingsSnap.exists()) {
+        res.json(settingsSnap.data());
+      } else {
+        res.json({
+          dailyDigestTime: "08:00",
+          workoutReminders: true,
+          checkInReminders: true,
+        });
+      }
+    } catch (err) {
+      console.error("Notification settings read error:", err);
+      res.status(500).json({ error: "Failed to read notification settings" });
+    }
+  });
+
+  // 4.6 — Data export (GDPR/CCPA compliance)
+  app.post("/api/fitness/export", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { format } = req.body as { format?: string };
+      const exportFormat = (format || "json").toLowerCase();
+
+      // Fetch all user data
+      const [profileSnap, workoutsSnap, plansSnap, checkInsSnap, chatSessionsSnap, wearableSnap] = await Promise.all([
+        getDoc(doc(db, "users", uid, "profile", "current")),
+        getDocs(query(collection(db, "users", uid, "workouts"), orderBy("createdAt", "desc"))),
+        getDocs(query(collection(db, "users", uid, "plans"), orderBy("createdAt", "desc"))),
+        getDocs(query(collection(db, "users", uid, "checkIns"), orderBy("createdAt", "desc"))),
+        getDocs(query(collection(db, "users", uid, "chatSessions"), orderBy("lastMessageAt", "desc"))),
+        getDoc(doc(db, "users", uid, "wearableData", "current")),
+      ]);
+
+      const exportData = {
+        exportedAt: Date.now(),
+        userId: uid,
+        profile: profileSnap.exists() ? profileSnap.data() : null,
+        workouts: workoutsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        plans: plansSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        checkIns: checkInsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        chatSessions: chatSessionsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        wearable: wearableSnap.exists() ? wearableSnap.data() : null,
+        version: "1.0",
+      };
+
+      if (exportFormat === "csv") {
+        // Flatten workouts to CSV
+        const ws = exportData.workouts;
+        let csv = "date,workoutName,focus,completed,duration,notes\n";
+        ws.forEach(w => {
+          const date = w.createdAt ? new Date(w.createdAt).toISOString().split("T")[0] : "";
+          csv += `${date},"${w.workoutName || ""}","${w.focus || ""}",${w.completed || false},${w.duration || 0},"${(w.notes || "").replace(/"/g, '""')}"\n`;
+        });
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename=polysync-workouts-${Date.now()}.csv`);
+        return res.send(csv);
+      }
+
+      res.json(exportData);
+    } catch (err) {
+      console.error("Export error:", err);
+      res.status(500).json({ error: "Failed to export data" });
+    }
+  });
+
+  // 4.7 — GDPR/CCPA account deletion
+  app.post("/api/fitness/settings/delete-account", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { confirm } = req.body as { confirm?: string };
+      if (confirm !== "DELETE") {
+        res.status(400).json({ error: "Confirmation required: confirm='DELETE'" });
+        return;
+      }
+
+      // Delete all user data across all collections
+      const collections = ["profile", "workouts", "plans", "wearableData", "chatSessions", "checkIns", "recovery", "subscription", "settings", "dailyDigest"];
+      await Promise.all(collections.map(col =>
+        deleteDoc(doc(db, "users", uid, col, "current"))
+      ));
+
+      // Delete workout documents
+      const workoutDocs = await getDocs(collection(db, "users", uid, "workouts"));
+      await Promise.all(workoutDocs.docs.map(d => deleteDoc(d.ref)));
+
+      // Delete plan documents
+      const planDocs = await getDocs(collection(db, "users", uid, "plans"));
+      await Promise.all(planDocs.docs.map(d => deleteDoc(d.ref)));
+
+      // Delete check-in documents
+      const checkInDocs = await getDocs(collection(db, "users", uid, "checkIns"));
+      await Promise.all(checkInDocs.docs.map(d => deleteDoc(d.ref)));
+
+      // Delete chat session documents
+      const chatDocs = await getDocs(collection(db, "users", uid, "chatSessions"));
+      await Promise.all(chatDocs.docs.map(d => deleteDoc(d.ref)));
+
+      res.json({ success: true, message: "Account deletion requested. Data will be fully removed within 30 days." });
+    } catch (err) {
+      console.error("Delete account error:", err);
+      res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
   app.post("/api/fitness/adapt-plan", async (req, res) => {
     const uid = requireAuth(req, res);
     if (!uid) return;
@@ -674,12 +1593,10 @@ async function startServer() {
     const uid = requireAuth(req, res);
     if (!uid) return;
     try {
-      // Delete all fitness data for this user
+      // Delete all fitness data for this user (simplified batch delete)
       const collections = ["profile", "workouts", "plans", "wearableData", "chatSessions", "checkIns", "recovery", "subscription", "settings", "dailyDigest"];
       for (const col of collections) {
         const colSnap = await getDocs(collection(db, "users", uid, col));
-        const batch = require("firebase-admin").firestore?.batch?.() as any;
-        // Note: In production, use proper batch deletes. This is a simplified version.
         for (const docSnap of colSnap.docs) {
           await doc(db, "users", uid, col, docSnap.id).delete();
         }
@@ -690,6 +1607,88 @@ async function startServer() {
       res.status(500).json({ error: "Failed to delete data" });
     }
   });
+  // 6.2 — AI-powered workout summary (What went well / Could improve / Next focus)
+  app.post("/api/fitness/workout-summary", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { workoutId } = req.body as { workoutId?: string };
+      if (!workoutId) {
+        res.status(400).json({ error: "workoutId is required" });
+        return;
+      }
+
+      const workoutRef = doc(db, "users", uid, "workouts", workoutId);
+      const workoutSnap = await getDoc(workoutRef);
+      if (!workoutSnap.exists()) {
+        res.status(404).json({ error: "Workout not found" });
+        return;
+      }
+
+      const workout = workoutSnap.data() as any;
+
+      if (!ai) {
+        res.json({
+          whatWentWell: "Workout completed! Keep up the consistency.",
+          couldImprove: "Try to focus on form and controlled movement.",
+          nextFocus: "Consistency is key — aim to hit your next scheduled workout.",
+          sandbox: true,
+        });
+        return;
+      }
+
+      const prompt = `Analyze this completed workout and provide 3 short feedback sections:
+
+Workout data:
+- Name: ${workout.workoutName || "Unknown"}
+- Focus: ${workout.focus || "General"}
+- Duration: ${workout.duration || 0} minutes
+- Completed: ${workout.completed ? "Yes" : "No"}
+- Exercises: ${workout.exercises?.length || 0} exercises
+- User profile goal: ${workout.userProfile?.goal || "Not available"}
+- User profile level: ${workout.userProfile?.level || "Not available"}
+
+Provide a JSON response with exactly these 3 fields:
+{
+  "whatWentWell": "2-3 sentences about what the user did well",
+  "couldImprove": "2-3 sentences about areas to improve",
+  "nextFocus": "2-3 sentences about what to focus on next"
+}
+
+Be encouraging and actionable. Keep each section concise.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          systemInstruction: `You are a fitness coach providing post-workout feedback. Be encouraging, specific, and actionable. Respond in valid JSON only.`,
+          temperature: 0.7,
+        },
+      });
+
+      const text = response.text || "{}";
+      let summary: { whatWentWell: string; couldImprove: string; nextFocus: string } = {
+        whatWentWell: "Great job completing your workout!",
+        couldImprove: "Focus on maintaining good form.",
+        nextFocus: "Your next workout is an opportunity to build on today's effort.",
+      };
+
+      try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          summary = JSON.parse(jsonMatch[0]);
+        }
+      } catch {
+        // Use default
+      }
+
+      res.json(summary);
+    } catch (err) {
+      console.error("Workout summary error:", err);
+      res.status(500).json({ error: "Failed to generate summary" });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -703,6 +1702,45 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // 6.2b — Weight entry logging endpoint
+  app.post("/api/fitness/weight", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const { weight, note } = req.body as { weight?: number; note?: string };
+      if (weight == null || weight <= 0 || weight > 300) {
+        res.status(400).json({ error: "Valid weight (1-300 kg/lbs) is required" });
+        return;
+      }
+      await setDoc(doc(db, "users", uid, "weightEntries", Date.now().toString()), {
+        userId: uid,
+        weight: Math.round(weight * 10) / 10,
+        note: note || "",
+        date: Date.now(),
+        createdAt: serverTimestamp(),
+      } as any);
+      res.json({ success: true, message: "Weight logged successfully" });
+    } catch (err) {
+      console.error("Weight log error:", err);
+      res.status(500).json({ error: "Failed to log weight" });
+    }
+  });
+
+  app.get("/api/fitness/weight/history", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const entriesSnap = await getDocs(
+        query(collection(db, "users", uid, "weightEntries"), orderBy("date", "desc"), limit(30))
+      );
+      const entries = entriesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      res.json({ entries });
+    } catch (err) {
+      console.error("Weight history error:", err);
+      res.status(500).json({ error: "Failed to get weight history" });
+    }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server standing by on port ${PORT}`);
@@ -898,7 +1936,22 @@ function generateDeterministicPlan(profile: FitnessProfile): WeeklyPlan {
   const exercisesPerWorkout = profile.level === "beginner" ? 4 : profile.level === "advanced" ? 6 : 5;
   const setsPerExercise = profile.level === "beginner" ? 2 : profile.level === "advanced" ? 4 : 3;
 
-  // Select exercises based on goal and equipment
+  // GLP-1 / special mode adjustments
+  let adjustedSets = setsPerExercise;
+  let adjustedReps = getRepRange(profile.goal, profile.level);
+  if (profile.specialMode === 'glp1') {
+    // GLP-1 users: lower intensity, more recovery, joint-friendly
+    adjustedSets = Math.max(1, setsPerExercise - 1);
+    adjustedReps = profile.level === 'beginner' ? '10-12' : '8-10';
+  } else if (profile.specialMode === 'postpartum') {
+    // Postpartum: lighter, pelvic floor friendly
+    adjustedSets = Math.max(1, setsPerExercise - 1);
+    adjustedReps = '12-15';
+  } else if (profile.specialMode === 'senior') {
+    // Older adults: balance and joint health focus
+    adjustedSets = Math.max(1, setsPerExercise - 1);
+    adjustedReps = '12-15';
+  }
   const selectedExercises = selectExercisesForGoal(profile);
 
   for (let i = 0; i < profile.daysPerWeek; i++) {
@@ -922,8 +1975,8 @@ function generateDeterministicPlan(profile: FitnessProfile): WeeklyPlan {
         instructions: ex.instructions,
         commonMistakes: ex.commonMistakes,
         substitutionIds: ex.substitutionIds,
-        sets: setsPerExercise,
-        reps: getRepRange(profile.goal, profile.level),
+        sets: adjustedSets,
+        reps: adjustedReps,
         rest: getRestTime(profile.goal),
         rpeTarget: getRpeTarget(profile.level),
         allowsSubstitution: true,
@@ -1223,98 +2276,21 @@ function computeRecoveryScore(input: RecoveryInput): {
     dataAgeHours: 0,
   };
 }
-function generateSandboxResponse(type: string, prompt: string, priority: string, role: string, userContext: any): string {
-  const brand = userContext?.productName || "PolyVerses Suite";
-  
-  if (type === "opportunity") {
-    return `### 📊 Simulated Opportunity Analysis for "${prompt}"
-*Generated by the PolyVerses Opportunity Planning Agent v3.1*
+// ─── Fitness Sandbox Helpers ────────────────────────────────────────────────
+// Fallback responses when Gemini API is unavailable or returns an error.
+// Each agent has its own sandbox generator that produces realistic, safe output.
 
-The RICE scoring framework has been applied to evaluate the potential impact of integrating **${prompt}** into **${brand}**.
-
-| Feature Scope | Reach (Monthly) | Impact (Scale 1-3) | Confidence (%) | Effort (Person-Mo) | RICE Score |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Unified Integration Engine** | 120,000 | 2.5 (High) | 85% | 3.0 | **85,000** |
-| **Real-time Slack Notification Rail** | 80,000 | 2.0 (Medium)| 90% | 1.5 | **96,000** |
-| **Visual Node Flow Manager** | 50,000 | 1.5 (Medium)| 80% | 2.0 | **30,000** |
-
-#### 💡 Agent Observations & Strategic Recommendations:
-1. **Prioritize Real-time Slack Rails first**: The incredibly low effort (1.5 person-months) relative to a high reach yields a superior RICE efficiency index.
-2. **Commit Unified Engine to Next Sprint**: Scale requirements suggest a high reach. PM approval is recommended before deployment.
-3. **Execution Routing**: Run via **GPT-4o Reasoning API** to analyze complex configuration models before shipping.`;
-  }
-
-  if (type === "compliance") {
-    return `### 🛡️ Compliance & Safety Audit Report for "${prompt}"
-*Generated by the Compliance & GDPR Audit Agent v3.1*
-
-The system has audited data transaction maps for **${prompt}** within **${brand}**'s core EKS deployment.
-
-#### 🟢 Strengths Identified:
-- Explicit data structures enforce regional isolation (Active US-East-1 db tables and warm passive replication to EU-West-1 are distinct).
-- AES-256 state ledger configurations prevent unauthorized read/writes.
-
-#### ⚠️ compliance Warnings & Vulnerabilities:
-1. **GDPR Account Erasure Risk**: The architecture lacks a declared pipeline to remove historical log streams in Redis within the 30-day CCPA/GDPR erasure requirement window.
-2. **Vague Data Masking Constraints**: The API payload contains elements where plain corporate credentials or slack tokens may accidentally trace to Prometheus performance telemetry logs.
-
-#### 🔧 Actionable Remediation Steps:
-1. **Configure Neo4j Eviction Jobs**: Establish a cron script to run every 24 hours to scrub node relationships associated with deleted users.
-2. **Apply SHA-256 Hashing**: Mask all slack tokens on the client edge prior to EKS queue admission.
-3. **Authorize Legal Exceptions**: Ensure only the **CPO (Chief Product Officer)** role can bypass or override compliance warnings.`;
-  }
-
-  if (type === "prd") {
-    return `# 📄 Product Requirements Document: ${prompt}
-## PolyVerses v3.1 Enterprise Standard Document
-
-**Target Model Allocated**: GPT-4o  
-**Assigned Owner**: ${role} (Enforced via RBAC)  
-**Priority Classification**: ${priority} Queue Target  
-
----
-
-## 1. Executive Intent & Goals
-The objective is to deploy a scalable **${prompt}** inside **${brand}** that increases product velocity, ensures flawless system compliance, and maintains active-passive failover state-safeguards.
-
-## 2. Dynamic Telemetry Success Targets
-- **User Activity Index**: Increase monthly user feature activation metrics by **> 14%** within the first 6 weeks of release.
-- **Latency Standard**: Ensure end-to-end API roundtrip delays remain **<= 180ms** under high concurrent thread cycles on the AWS EKS instance.
-- **Failover SLA**: Maintain flawless active-passive Route53 failover capability, recovering database states to warm standbys in **< 120 seconds**.
-
-## 3. Recommended Core Architecture Requirements
-- **Queue Layer**: Manage processing loads on Redis priority streams with separate lanes for High, Medium, and Low workloads.
-- **Context Engines**: Route unstructured context queries to Pinecone vector indices, mapping complex feature linkages in Neo4j graph nodes.
-- **Circuit Breakers**: Enforce automated fallback logic (3 retries, exponential backoff) with automatic alerts escalated to human-PMs on failure.
-
-## 4. Legal Compliance & Purging Rules
-- Enforce GDPR compliance routines checking data handling specifications to prevent plain PII outputs.
-- Retain detailed execution transaction audit logs safe for up to 10 years to adhere to standard enterprise compliance policies.`;
-  }
-
-  if (type === "rollback") {
-    return `### 📉 SRE Rollback Budget Telemetry Checklist
-*Deployment Health Analysis for ${prompt}*
-
-Our monitoring agents have analyzed live Kubernetes runtime performance telemetry:
-
-- **Deployment Image**: \`athenaos-orchestrator:${priority.toLowerCase()}-v3\`
-- **Pod Latency (p95)**: 145ms *(Target Budget: 800ms) - OK*
-- **Request Failure Rate**: 0.08% *(Max Safe Margin: 2.0%) - OK*
-- **Redis Lock Key Sync**: 100% synchronized in 4.2ms - *OK*
-- **Route53 Active Link**: US-East-1 Active (Primary)  
-
-**Status**: 🟢 **HEALTHY**. Standard performance metrics are well within the safe operational error budget margins. Automatic rollback trigger is idle. No action is required.`;
-  }
-
-  return `### 🧠 PolyVerses v3.1 Synthesized Executive Insight
-*For concept: "${prompt}"*
-
-Our product agent network has evaluated the initial parameters for **${prompt}**:
-- **Active User Role Account**: ${role} authorization verified.
-- **Routing Lane Allocated**: Priority stream **${priority}** (Redis Stream worker allocated).
-- **Core Recommendation**: Start with **Opportunity Prioritization Scopes** and perform compliance scrubbing immediately.
-- **Multi-region Synchronization Link**: Global datastore active. Passive standby stands by in eu-west-1.`;
+function sandboxProfileSaved(profile: FitnessProfile): string {
+  return `✅ Profile saved successfully (sandbox mode).
+Goal: ${profile.goal}
+Level: ${profile.level}
+Injuries: ${profile.injuries.join(", ") || "none"}
+Equipment: ${profile.equipment.join(", ") || "none"}
+Days/week: ${profile.daysPerWeek}
+Session duration: ${profile.sessionDuration}min
+Focus areas: ${profile.focus.join(", ") || "full_body"}
+Health data consent: ${profile.healthDataConsent}
+Special mode: ${profile.specialMode || "none"}`;
 }
 // ═══════════════════════════════════════════════════════════════════════════
 // POLYVERSES PM WORKBENCH — Agent Layer (F00–F11 Orchestration)
@@ -3019,6 +3995,218 @@ app.post('/api/act', async (req, res) => {
     res.json({ success: true, data: result.data });
   } catch (err) { console.error('[Act] Error:', err); res.status(500).json({ error: 'Act failed: ' + (err instanceof Error ? err.message : String(err)) }); }
 });
+
+
+function sandboxPlanGenerated(profile: FitnessProfile, plan: WeeklyPlan): string {
+  const daysStr = plan.days.map(d => {
+    const workout = d.workouts[0];
+    return `  Day ${d.dayIndex} (${d.date}): ${workout?.workoutName || "Rest"} — ${workout?.exercises?.length || 0} exercises`;
+  }).join("\n");
+  return `✅ Weekly plan generated (sandbox mode) — Week ${plan.weekNumber}
+${daysStr}
+
+Note: This is a simulated response. Connect GEMINI_API_KEY for real AI-powered plan generation.`;
+}
+
+function sandboxWorkoutLogged(profile: FitnessProfile): string {
+  return `✅ Workout logged (sandbox mode).
+Adaptation summary: ${profile.goal === "build_muscle" ? "Progressive overload applied — next week's volume increased by ~10%." : profile.goal === "lose_weight" ? "Maintained intensity — next week focuses on consistency and recovery." : "Plan maintained — continue building the habit."}
+Note: Connect GEMINI_API_KEY for real adaptation analysis.`;
+}
+
+function sandboxChatResponse(message: string, profile: FitnessProfile | null): string {
+  const userContext = profile ? ` (goal: ${profile.goal}, level: ${profile.level})` : "";
+  if (message.toLowerCase().includes("injury") || message.toLowerCase().includes("pain")) {
+    return `⚠️ I'm an AI fitness coach, not a medical professional. If you're experiencing pain or have an injury concern, please consult a healthcare provider or physical therapist.
+In the meantime: rest the affected area, avoid exercises that cause pain, and let me know your injury so I can adjust your workout plan to work around it.`;
+  }
+  if (message.toLowerCase().includes("nutrition") || message.toLowerCase().includes("diet") || message.toLowerCase().includes("food")) {
+    return `🥗 Great question about nutrition${userContext}!
+General guidance: focus on protein intake (${profile?.level === "advanced" ? "1.6-2.2g per kg of bodyweight" : "0.8-1.2g per kg"}), stay hydrated (2-3L water/day), and eat a balanced mix of complex carbs, lean protein, and healthy fats.
+For personalized nutrition planning, consider talking to a registered dietitian. I can help with general guidance and motivation!`;
+  }
+  if (message.toLowerCase().includes("form") || message.toLowerCase().includes("technique") || message.toLowerCase().includes("how to")) {
+    return `🏋️ Form is everything! Proper technique prevents injury and maximizes results.
+For specific form cues on an exercise, tell me which exercise you're working on and I'll give you a breakdown of setup, movement pattern, common mistakes, and cues to focus on.
+When in doubt: start lighter than you think you need to, move slowly, and prioritize control over weight.`;
+  }
+  return `💪 Great question${userContext}! Here's my take:
+\"${message.slice(0, 120)}\"
+
+My general advice: stay consistent, listen to your body, and focus on progressive improvement over time. What's your current situation with this? I can tailor my answer if you share more details about your goals, experience level, and any limitations.`;
+}
+
+function sandboxRecoveryAssessed(input: RecoveryInput): string {
+  const score = computeRecoveryScore(input);
+  let recommendation: string;
+  if (score >= 75) recommendation = "train_normal — You're well-recovered. Go ahead with your planned workout.";
+  else if (score >= 50) recommendation = "reduce_volume — You're somewhat recovered. Consider reducing volume by 20-30% or focusing on technique work.";
+  else if (score >= 25) recommendation = "reduce_intensity — Recovery is low. Skip heavy loads today; do light mobility or active recovery instead.";
+  else recommendation = "rest — Your body needs rest. Take a recovery day — light walking or stretching only.";
+  
+  return `📊 Recovery Assessment (sandbox mode): ${score}/100
+Recommendation: ${recommendation}
+Factors: sleep quality, recent workout frequency, self-reported energy, pain notes
+Note: Connect wearable data + GEMINI_API_KEY for real recovery analysis powered by your actual data.`;
+}
+
+function sandboxFormCue(exerciseName: string): string {
+  return `🏋️ Form Cue for ${exerciseName} (sandbox mode):
+Setup: Stand with feet shoulder-width apart, core engaged, neutral spine.
+Movement: Control the weight through the full range of motion. Don't rush the eccentric (lowering) phase — 2-3 seconds down, explosive but controlled up.
+Common mistakes: [Varies by exercise — connect GEMINI_API_KEY for specific form analysis]
+Focus cue: \"Move with intention, not momentum.\"
+Note: For exercise-specific form video analysis, this feature is planned for Phase 3 (computer vision integration).`;
+}
+
+function sandboxNutritionGuidance(profile: FitnessProfile | null, query: string): string {
+  const goalContext = profile?.goal === "build_muscle" ? "muscle building" : profile?.goal === "lose_weight" ? "fat loss" : "general fitness";
+  return `🥗 Nutrition Guidance for ${goalContext} (sandbox mode):
+Based on your goal of ${goalContext}:
+
+• Protein: Prioritize lean sources (chicken, fish, eggs, tofu, legumes) — aim for a protein source at every meal.
+• Carbs: Focus on complex carbs (oats, quinoa, sweet potatoes, whole grains) — time them around workouts for energy.
+• Fats: Include healthy fats (avocado, nuts, olive oil) — essential for hormone health and satiety.
+• Hydration: 2-3 liters of water daily, more if training hard or in hot conditions.
+• Timing: Eat a balanced meal 2-3 hours before training, and include protein + carbs within 1-2 hours after.
+
+⚠️ Disclaimer: I'm an AI fitness coach, not a registered dietitian. For personalized meal plans, medical conditions, or specific dietary needs, consult a qualified nutrition professional.
+
+Note: Connect GEMINI_API_KEY for real AI-powered nutrition guidance tailored to your profile.`;
+}
+
+}
+
+
+
+// 5.3 — Exercise name lookup for insights
+const EXERCISE_NAMES: Record<string, string> = {
+  "barbell-bench-press": "Barbell Bench Press",
+  "barbell-deadlift": "Barbell Deadlift",
+  "barbell-squat": "Barbell Squat",
+  "barbell-ohp": "Overhead Press",
+  "dumbbell-curl": "Dumbbell Curl",
+  "dumbbell-row": "Dumbbell Row",
+  "pull-up": "Pull-Up",
+  "push-up": "Push-Up",
+  "lunge": "Lunge",
+  "plank": "Plank",
+  "leg-press": "Leg Press",
+  "lat-pulldown": "Lat Pulldown",
+  "shoulder-press": "Shoulder Press",
+  "bicep-curl": "Bicep Curl",
+  "tricep-extension": "Tricep Extension",
+  "leg-curl": "Leg Curl",
+  "leg-extension": "Leg Extension",
+  "hip-thrust": "Hip Thrust",
+  "face-pull": "Face Pull",
+  "calf-raise": "Calf Raise",
+};
+
+// 5.3 — External API integrations (ExerciseAPI, Spoonacular, Strava)
+// Configure API keys in .env.local: EXERCISE_API_KEY, SPOONACULAR_API_KEY, STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET
+
+async function queryExerciseAPI(query: string): Promise<any[]> {
+  const apiKey = process.env.EXERCISE_API_KEY;
+  if (!apiKey) return [];
+  try {
+    const res = await fetch(`https://api.exerciseapi.com/v1/exercises?name=${encodeURIComponent(query)}&limit=10`, {
+      headers: { "X-API-Key": apiKey },
+    });
+    if (!res.ok) throw new Error("ExerciseAPI error");
+    return res.json();
+  } catch (err) {
+    console.error("ExerciseAPI query failed:", err);
+    return [];
+  }
+}
+
+async function searchExercises(name: string): Promise<any[]> {
+  // Try ExerciseAPI first if configured
+  const apiResults = await queryExerciseAPI(name);
+  if (apiResults.length > 0) return apiResults;
+
+  // Fallback: local exercise library search
+  const fromLibrary = Object.values(EXERCISE_LIBRARY).filter(
+    e => e.name.toLowerCase().includes(name.toLowerCase())
+  );
+  return fromLibrary.map(e => ({ name: e.name, id: e.id, category: e.category }));
+}
+
+async function querySpoonacular(query: string): Promise<any> {
+  const apiKey = process.env.SPOONACULAR_API_KEY;
+  if (!apiKey) return { error: "Nutrition API not configured" };
+  try {
+    const res = await fetch(
+      `https://api.spoonacular.com/recipes/complexSearch?query=${encodeURIComponent(query)}&number=5&apiKey=${apiKey}`
+    );
+    if (!res.ok) throw new Error("Spoonacular error");
+    return res.json();
+  } catch (err) {
+    console.error("Spoonacular query failed:", err);
+    return { error: "Nutrition search failed" };
+  }
+}
+
+async function getStravaStats(accessToken: string): Promise<any> {
+  try {
+    const res = await fetch("https://www.strava.com/api/v3/athlete", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) throw new Error("Strava API error");
+    return res.json();
+  } catch (err) {
+    console.error("Strava API failed:", err);
+    return { error: "Strava connection failed" };
+  }
+}
+
+
+
+  // 5.3 — External exercise search
+  app.get("/api/fitness/external/exercises", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    const { q } = req.query as { q?: string };
+    if (!q) return res.json({ results: [] });
+    try {
+      const results = await searchExercises(q);
+      res.json({ results });
+    } catch (err) {
+      console.error("Exercise search error:", err);
+      res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // 5.3 — External nutrition search
+  app.get("/api/fitness/external/nutrition", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    const { q } = req.query as { q?: string };
+    if (!q) return res.json({ results: [], error: "No query" });
+    try {
+      const results = await querySpoonacular(q);
+      res.json(results);
+    } catch (err) {
+      console.error("Nutrition search error:", err);
+      res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // 5.3 — Strava connection status
+  app.get("/api/fitness/external/strava", async (req, res) => {
+    const uid = requireAuth(req, res);
+    if (!uid) return;
+    try {
+      const wearableRef = doc(db, "users", uid, "wearableData", "current");
+      const snap = await getDoc(wearableRef);
+      if (!snap.exists()) return res.json({ connected: false });
+      const data = snap.data();
+      res.json({ connected: !!data.stravaAccessToken, athlete: data.stravaAthlete || null });
+    } catch (err) {
+      res.json({ connected: false });
+    }
+  });
 
 
 startServer();

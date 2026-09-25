@@ -29,13 +29,16 @@ export default function App() {
   const [currentSet, setCurrentSet] = useState<{ exerciseId: string; setNumber: number } | null>(null);
   const [exerciseLogs, setExerciseLogs] = useState<Record<string, any[]>>({});
   const [showCoachPanel, setShowCoachPanel] = useState(false);
+  const [showCheckIn, setShowCheckIn] = useState(false);
+  const [checkInWorkoutId, setCheckInWorkoutId] = useState<string | undefined>();
+  const [streak, setStreak] = useState(0);
+  const [streakLoading, setStreakLoading] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
         try {
-          // Check if profile exists
           const profileRef = doc(db, 'users', user.uid, 'profile', 'current');
           const profileSnap = await getDoc(profileRef);
           if (profileSnap.exists()) {
@@ -52,12 +55,33 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    fetchStreak();
+  }, [currentUser]);
+
+  const fetchStreak = async () => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch('/api/fitness/streaks', {
+        headers: { 'x-user-id': currentUser.uid },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStreak(data.currentStreak || 0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch streak:', err);
+    } finally {
+      setStreakLoading(false);
+    }
+  };
+
   const handleOnboardingComplete = (p: FitnessProfile) => {
     setProfile(p);
     setOnboarded(true);
   };
 
-  // Fetch plan when profile is loaded
   useEffect(() => {
     if (!profile || !currentUser) return;
     fetchPlan();
@@ -129,19 +153,22 @@ export default function App() {
 
   const handleNextSet = (exerciseId: string, setNumber: number) => {
     setCurrentSet({ exerciseId, setNumber: setNumber + 1 });
-    // Auto-start rest timer for next set
-    // (in a real app, you'd get rest time from the exercise config)
   };
 
   const handleSubmitWorkout = async (completed: boolean) => {
     if (!currentUser || !plan || !todayWorkout) return;
     try {
+      // If completing, show weight entry prompt first
+      if (completed) {
+        const weight = await promptForWeight(currentUser.uid);
+        if (weight !== null) {
+          await logWeightEntry(currentUser.uid, weight);
+        }
+      }
       const workoutData: WorkoutLogEntry = {
         userId: currentUser.uid,
         planId: plan.id || plan.weekNumber.toString(),
         dayIndex: todayWorkout.day.dayIndex,
-        workoutName: todayWorkout.workout.workoutName,
-        focus: todayWorkout.workout.focus,
         exercises: Object.entries(exerciseLogs).map(([exId, sets]) => ({
           exerciseId: exId,
           name: EXERCISE_LIBRARY[parseInt(exId)]?.name || exId,
@@ -172,7 +199,12 @@ export default function App() {
         body: JSON.stringify(workoutData)
       });
       if (res.ok) {
-        alert('Workout logged! Your plan will adapt for next week.');
+        if (completed) {
+          setCheckInWorkoutId(todayWorkout.workout.workoutName);
+          setShowCheckIn(true);
+        } else {
+          alert('Workout skipped. Your plan will adapt for next week.');
+        }
         setExerciseLogs({});
         setTodayWorkout(null);
         fetchPlan();
@@ -186,6 +218,7 @@ export default function App() {
     { id: 'today', icon: Activity, label: "Today's Workout" },
     { id: 'weekly', icon: Target, label: 'Weekly Plan' },
     { id: 'progress', icon: BarChart3, label: 'Progress' },
+    { id: 'insights', icon: TrendingUp, label: 'Insights' },
     { id: 'coach', icon: Sparkles, label: 'Coach Chat' },
     { id: 'settings', icon: Settings, label: 'Settings' },
     { id: 'think', icon: Brain, label: 'PM Workbench' },
@@ -231,14 +264,22 @@ export default function App() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="text-xs text-[#71717A] uppercase tracking-wide">
-                {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]
-                }
+                {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]}
               </div>
               <h2 className="text-xl font-bold mt-1">{workout.workoutName}</h2>
               <div className="flex items-center gap-2 mt-1">
                 <Target className="w-4 h-4 text-[#00A3FF]" />
                 <span className="text-sm text-[#A1A1AA]">{workout.focus}</span>
                 <span className="text-xs text-[#71717A]">· {workout.duration} min</span>
+                {day.recoveryScore != null && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                    day.recoveryScore >= 70 ? 'bg-[#10B981]/20 text-[#10B981]' :
+                    day.recoveryScore >= 40 ? 'bg-[#F59E0B]/20 text-[#F59E0B]' :
+                    'bg-[#EF4444]/20 text-[#EF4444]'
+                  }`}>
+                    Recovery: {day.recoveryScore}
+                  </span>
+                )}
               </div>
             </div>
             {restTimer !== null && (
@@ -263,6 +304,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
+                    {currentUser && <FormCueButton exerciseId={exercise.exerciseId} exerciseName={exercise.name} userId={currentUser.uid} />}
                     {exercise.sets?.filter(s => s.completed).length === exercise.prescribedSets && (
                       <Check className="w-5 h-5 text-[#10B981]" />
                     )}
@@ -354,6 +396,19 @@ export default function App() {
           <AlertTriangle className="w-3.5 h-3.5" />
           AI-generated fitness guidance. Listen to your body and consult a professional for injuries.
         </div>
+
+        {showCheckIn && (
+          <div className="mt-4">
+            <CheckInForm
+              workoutId={checkInWorkoutId}
+              onComplete={() => {
+                setShowCheckIn(false);
+                setCheckInWorkoutId(undefined);
+                fetchPlan();
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   };
@@ -379,6 +434,25 @@ export default function App() {
 
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+    const cardClass = (isExpanded: boolean, isToday: boolean) =>
+      isExpanded
+        ? 'bg-[#00A3FF]/10 border-[#00A3FF]/30'
+        : isToday
+        ? 'bg-[#00A3FF]/5 border-[#00A3FF]/20'
+        : 'bg-[#16161A] border-[#27272A] hover:border-[#3f3f46]';
+
+    const recoveryBadgeClass = (score: number) =>
+      score >= 70 ? 'bg-[#10B981]' : score >= 40 ? 'bg-[#F59E0B]' : 'bg-[#EF4444]';
+
+    const recClass = (rec: string) =>
+      rec === 'train_normal' ? 'bg-[#10B981]/20 text-[#10B981]' :
+      rec === 'reduce_intensity' ? 'bg-[#F59E0B]/20 text-[#F59E0B]' :
+      'bg-[#71717A]/20 text-[#71717A]';
+
+    const recLabel = (rec: string) =>
+      rec === 'train_normal' ? '✓ Train' :
+      rec === 'reduce_intensity' ? '↓ Reduce' : '— Rest';
+
     return (
       <div className="flex flex-col">
         <div className="bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl p-4 mb-4">
@@ -397,17 +471,15 @@ export default function App() {
                 <div
                   key={idx}
                   onClick={() => setExpandedDay(isExpanded ? null : idx)}
-                  className={`relative rounded-lg border p-3 text-center cursor-pointer transition-all ${
-                    isExpanded
-                      ? 'bg-[#00A3FF]/10 border-[#00A3FF]/30'
-                      : isToday
-                      ? 'bg-[#00A3FF]/5 border-[#00A3FF]/20'
-                      : 'bg-[#16161A] border-[#27272A] hover:border-[#3f3f46]'
-                  }`}
+                  className={`relative rounded-lg border p-3 text-center cursor-pointer transition-all ${cardClass(isExpanded, isToday)}`}
                 >
-                  <div className={`text-xs font-medium mb-1 ${
-                    isToday ? 'text-[#00A3FF]' : 'text-[#71717A]'
-                  }`}>
+                  {day.recoveryScore != null && (
+                    <div
+                      className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-[#121215] ${recoveryBadgeClass(day.recoveryScore)}`}
+                      title={`Recovery: ${day.recoveryScore}`}
+                    />
+                  )}
+                  <div className={`text-xs font-medium mb-1 ${isToday ? 'text-[#00A3FF]' : 'text-[#71717A]'}`}>
                     {dayLabels[idx]}
                   </div>
                   {isExpanded ? <ChevronUp className="w-4 h-4 text-[#00A3FF] mx-auto" /> : <ChevronDown className="w-4 h-4 text-[#71717A] mx-auto" />}
@@ -423,6 +495,13 @@ export default function App() {
                   {!isExpanded && day.workouts?.length > 0 && (
                     <div className="mt-2 text-xs text-[#A1A1AA]">
                       Tap to expand
+                    </div>
+                  )}
+                  {day.recoveryRecommendation && isExpanded && (
+                    <div className="mt-2 text-xs text-center">
+                      <span className={`px-1.5 py-0.5 rounded-full ${recClass(day.recoveryRecommendation)}`}>
+                        {recLabel(day.recoveryRecommendation)}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -461,28 +540,142 @@ export default function App() {
     );
   };
 
-  const renderProgress = () => {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <BarChart3 className="w-12 h-12 text-[#71717A] mb-4" />
-        <h3 className="text-lg font-medium mb-2">Progress Dashboard</h3>
-        <p className="text-[#71717A] text-sm max-w-md">
-          Track your strength trends, workout frequency, and volume over time.
-          Coming soon — log your first workout to see data here.
+  const renderInsights = () => {
+    return currentUser ? (
+      <div className="px-4 py-6">
+        <InsightsDashboard userId={currentUser.uid} />
+      </div>
+    ) : (
+      <div className="flex flex-col items-center justify-center h-full text-center px-4">
+        <div className="w-16 h-16 rounded-full bg-[#6366F1]/10 flex items-center justify-center mb-4">
+          <TrendingUp className="w-8 h-8 text-[#6366F1]" />
+        </div>
+        <h4 className="text-[#E4E4E7] font-semibold mb-2">Your Insights</h4>
+        <p className="text-sm text-[#71717A] max-w-sm">
+          See your workout trends, streaks, and progress at a glance.
         </p>
       </div>
     );
   };
 
-  const renderCoachChat = () => {
-    return (
+  const renderProgress = () => {
+    return currentUser ? (
+      <ProgressDashboard userId={currentUser.uid} />
+    ) : (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <Sparkles className="w-12 h-12 text-[#71717A] mb-4" />
-        <h3 className="text-lg font-medium mb-2">Coach Chat</h3>
+        <BarChart3 className="w-12 h-12 text-[#71717A] mb-4" />
+        <h3 className="text-lg font-medium mb-2">Progress Dashboard</h3>
         <p className="text-[#71717A] text-sm max-w-md">
-          Chat with your AI fitness coach. Ask about form, nutrition, recovery, or get motivation.
-          Coming soon — the conversational coach is in development.
+          Track your strength trends, workout frequency, and volume over time.
+          Log in to see your progress.
         </p>
+      </div>
+    );
+  };
+
+  const handleSendMessage = async (message: string): Promise<ChatResponse> => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const lang = (profile as any)?.language as SupportedLanguage || 'en';
+    const res = await fetch('/api/fitness/chat?stream=true', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.uid },
+      body: JSON.stringify({ message, lang, context: { profile, recentWorkouts: [], currentPlan: plan } }),
+    });
+    if (!res.ok) throw new Error('Chat request failed');
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('No stream');
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let suggestions: string[] = [];
+    let responseTime: number | undefined;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.done) {
+              fullText = data.response || fullText;
+              suggestions = data.suggestions || [];
+              responseTime = data.responseTime;
+            } else if (data.text !== undefined) {
+              fullText += data.text;
+            }
+          } catch {}
+        }
+      }
+    }
+    return { reply: fullText, agentId: 'F06', suggestions, responseTime };
+  };
+
+  const updateProfileLanguage = async (lang: SupportedLanguage) => {
+    if (!currentUser || !profile) return;
+    try {
+      const profileRef = doc(db, 'users', currentUser.uid, 'profile', 'current');
+      await setDoc(profileRef, { ...profile, language: lang }, { merge: true });
+      setProfile({ ...profile, language: lang });
+    } catch (err) {
+      console.error('Failed to update language:', err);
+    }
+  };
+
+  const renderCoachChat = () => {
+    const chatLanguage = (profile as any)?.language as string || 'en';
+    return (
+      <div className="flex flex-col h-full">
+        <div className="bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl p-4 flex-1">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Coach Chat</h2>
+            <span className="text-xs text-[#71717A]">AI-powered fitness coaching</span>
+          </div>
+          <CoachChat
+            profile={profile}
+            recentWorkouts={[]}
+            currentPlan={plan}
+            onSendMessage={handleSendMessage}
+            loading={false}
+            chatLanguage={chatLanguage}
+          />
+
+        {/* Nutrition Advisor */}
+        <div className="mt-4">
+          <NutritionPanel profile={(profile as any) || null} userId={currentUser?.uid || ''} />
+        </div>
+
+        {/* Language selector */}
+        <div className="mt-4 p-4 bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+            <Globe className="w-4 h-4 text-[#00A3FF]" />
+            Coach Language
+          </h3>
+          <p className="text-xs text-[#71717A] mb-3">
+            Choose the language the AI coach will use to respond to you.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {LANGUAGES.map(lang => (
+              <button
+                key={lang.code}
+                onClick={() => updateProfileLanguage(lang.code)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                  (profile as any)?.language === lang.code
+                    ? 'bg-[#00A3FF]/20 border-[#00A3FF]/40 text-[#00A3FF]'
+                    : 'bg-[#1A1A20] border-[#27272A] text-[#A1A1AA] hover:border-[#3f3f46]'
+                }`}
+              >
+                {lang.flag} {lang.name}
+              </button>
+            ))}
+          </div>
+          {(profile as any)?.language && (
+            <p className="text-xs text-[#71717A] mt-2">
+              Coach will respond in {(profile as any).language.toUpperCase()}.
+            </p>
+          )}
+        </div>
+        </div>
       </div>
     );
   };
@@ -514,6 +707,51 @@ export default function App() {
               <ChevronRight className="w-4 h-4 text-[#71717A]" />
             </button>
 
+            {/* HealthKit Connect Card */}
+            <div className="mt-3 p-4 bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl">
+              <h3 className="text-sm font-semibold mb-3">Connect a Wearable</h3>
+              <p className="text-xs text-[#71717A] mb-4">
+                Connect your wearable to get recovery scores, sleep tracking, and personalized coaching adjustments.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => alert('Apple HealthKit integration — connect via Safari on iOS/macOS')}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-[#27272A] hover:bg-[#16161A] transition text-left"
+                >
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#A2AAAD] to-[#5C6370] flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.98-2.61.02-2.69-1.06-.08-1.04.99-1.88 1.97-2.15.39-.12.85-.16 1.22-.16h.01c.49 0 .98.13 1.35.43.37.3.61.7.67 1.16.06.46-.09.93-.39 1.28-.13.13-.27.2-.45.2H17c-.69 0-1.25-.45-1.45-1.1C15.35 19.5 15.83 19.95 17.05 20.28zM12.03 21.7c-.32.32-.84.34-1.22.08-.38-.26-.54-.76-.44-1.26.08-.42.34-.88.78-1.24.19-.16.42-.25.69-.25h.05c.46 0 .82.3 1 .74.18.44.15.96-.1 1.3-.09.12-.2.2-.36.2h-.32c-.5 0-.92-.42-.94-1 0-.02-.01-.05-.01-.08zM8.06 22.01c-.57.57-1.52.6-2.15.12-.62-.48-.68-1.52-.23-2.22.46-.7.75-1.01 1.1-1.41.13-.16.31-.25.51-.25h.08c.37 0 .67.22.89.58.22.36.26.82.06 1.22-.06.13-.15.22-.28.28H8.2c-.35 0-.67-.19-.83-.54-.14-.32-.17-.66-.07-1 .04-.14.1-.28.1-.3zM4.16 21.52c-.76.46-1.71.21-2.17-.3-.47-.5-.54-1.28-.14-1.92.4-.66.58-1.1.62-1.72.04-.62-.12-1.18-.64-1.68-.17-.17-.39-.27-.64-.27h-.04c-.47 0-.85.3-1.04.75-.19.45-.15.98.12 1.45.09.13.19.22.33.28h.34c.42 0 .77-.28.94-.72.16-.42.15-.89-.08-1.34-.06-.13-.14-.2-.26-.25z"/></svg>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">Apple HealthKit</div>
+                    <div className="text-xs text-[#71717A] mt-0.5">iOS / macOS</div>
+                  </div>
+                  <div className="ml-auto">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981]">Connect</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => alert('Google Fit integration — connect via OAuth')}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-[#27272A] hover:bg-[#16161A] transition text-left"
+                >
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4285F4] to-[#34A853] flex items-center justify-center">
+                    <span className="text-white text-xs font-bold">G</span>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">Google Fit</div>
+                    <div className="text-xs text-[#71717A] mt-0.5">Android / Web</div>
+                  </div>
+                  <div className="ml-auto">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-[#F59E0B]/20 text-[#F59E0B]">Connect</span>
+                  </div>
+                </button>
+              </div>
+              <div className="mt-3 pt-3 border-t border-[#27272A]">
+                <p className="text-xs text-[#71717A]">
+                  No wearables connected yet.
+                </p>
+              </div>
+            </div>
+
             <button className="w-full flex items-center gap-3 p-3 rounded-lg border border-[#27272A] hover:bg-[#16161A] transition text-left">
               <ClockIcon className="w-4 h-4 text-[#00A3FF]" />
               <div className="flex-1">
@@ -522,6 +760,55 @@ export default function App() {
               </div>
               <ChevronRight className="w-4 h-4 text-[#71717A]" />
             </button>
+
+            {/* Notification Settings Panel */}
+            <div className="mt-3 p-4 bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] rounded-xl animate-in fade-in zoom-in duration-200">
+              <h3 className="text-sm font-semibold mb-4">Notification Preferences</h3>
+
+              {/* Daily digest time */}
+              <div className="mb-4">
+                <label className="text-xs text-[#71717A] block mb-1">Daily digest delivery time</label>
+                <div className="flex items-center gap-2">
+                  {['06:00', '07:00', '08:00', '09:00', '10:00', '18:00', '19:00', '20:00'].map(time => (
+                    <button
+                      key={time}
+                      onClick={() => {/* TODO: save to /api/fitness/settings/notifications */}}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${time === '08:00' ? 'bg-[#00A3FF]/20 border-[#00A3FF]/40 text-[#00A3FF]' : 'bg-[#1A1A20] border-[#27272A] text-[#71717A] hover:border-[#3f3f46]'}`}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Toggles */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#E4E4E7]">Workout reminders</span>
+                  <div className="w-10 h-5 rounded-full bg-[#00A3FF] relative">
+                    <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 right-0.5 shadow-sm" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#E4E4E7]">Post-workout check-in prompt</span>
+                  <div className="w-10 h-5 rounded-full bg-[#00A3FF] relative">
+                    <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 right-0.5 shadow-sm" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#E4E4E7]">Recovery score notification</span>
+                  <div className="w-10 h-5 rounded-full bg-[#27272A] relative">
+                    <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 left-0.5 shadow-sm" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-[#27272A]">
+                <p className="text-xs text-[#71717A]">
+                  Push notifications require browser permission. Daily digest is sent via email or in-app.
+                </p>
+              </div>
+            </div>
 
             <button className="w-full flex items-center gap-3 p-3 rounded-lg border border-[#27272A] hover:bg-[#16161A] transition text-left">
               <AlertTriangle className="w-4 h-4 text-[#F59E0B]" />
@@ -542,7 +829,22 @@ export default function App() {
             <a href="https://github.com/OssamaMokhtar/PolyVerses" className="text-[#00A3FF] hover:underline" target="_blank" rel="noopener noreferrer">
               View on GitHub →
             </a>
-          </div>
+          </p>
+        </div>
+
+        {/* Subscription status */}
+        <div className="mt-4">
+          <SubscriptionStatus userId={currentUser?.uid || ''} />
+        </div>
+
+        {/* Data export */}
+        <div className="mt-4">
+          <ExportButton userId={currentUser?.uid || ''} />
+        </div>
+
+        {/* Delete account */}
+        <div className="mt-4">
+          <DeleteAccountButton userId={currentUser?.uid || ''} />
         </div>
 
         <button
@@ -575,11 +877,10 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0C0C0E] text-[#E4E4E7] flex flex-col selection:bg-[#00A3FF]/30 selection:text-[#E4E4E7] p-2 md:p-4 border-[6px] md:border-[10px] border-[#1A1A1E] font-sans relative">
-      {/* Background gradient */}
+    <ErrorBoundary>
+      <div className="min-h-screen bg-[#0C0C0E] text-[#E4E4E7] flex flex-col selection:bg-[#00A3FF]/30 selection:text-[#E4E4E7] p-2 md:p-4 border-[10px] md:border-[10px] border-[#1A1A1E] font-sans relative">
       <div className="absolute top-0 left-0 right-0 h-[250px] bg-gradient-to-b from-[#00A3FF]/5 via-transparent to-transparent blur-3xl pointer-events-none" />
 
-      {/* Header */}
       <header className="bg-[#121215]/90 backdrop-blur-xl border border-[#27272A] px-4 py-3 rounded-xl z-30 flex items-center justify-between gap-4 shadow-xl mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-[#00A3FF]/10 text-[#00A3FF] border border-[#00A3FF]/20 rounded-lg shrink-0">
@@ -593,7 +894,7 @@ export default function App() {
               </span>
             </div>
             <div className="text-xs text-[#71717A] mt-0.5">
-              {profile?.goal?.replace('_', ' ') || 'Get started'}
+              {profile?.goal?.replace(/_/g, ' ') || 'Get started'}
             </div>
           </div>
         </div>
@@ -605,6 +906,12 @@ export default function App() {
               Health Data
             </div>
           )}
+          {!streakLoading && streak > 0 && (
+            <div className="status-pill !text-[#F59E0B] !bg-[#F59E0B]/10 !border-[#F59E0B]/30 px-2 py-1 flex items-center gap-1 text-xs">
+              <Flame className="w-3 h-3" />
+              {streak} day streak
+            </div>
+          )}
           <div className="status-pill !text-[#10B981] !bg-[#10B981]/10 !border-[#10B981]/30 px-2 py-1 flex items-center gap-1 text-xs">
             <Activity className="w-3 h-3" />
             ONLINE
@@ -612,7 +919,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tab navigation */}
       <nav className="flex gap-1 mb-4 flex-wrap">
         {tabs.map(tab => (
           <button
@@ -630,21 +936,21 @@ export default function App() {
         ))}
       </nav>
 
-      {/* Tab content */}
       <div className="flex-1">
         {activeTab === 'today' && renderToday()}
         {activeTab === 'weekly' && renderWeeklyPlan()}
         {activeTab === 'progress' && renderProgress()}
+        {activeTab === 'insights' && renderInsights()}
         {activeTab === 'coach' && renderCoachChat()}
         {activeTab === 'settings' && renderSettings()}
         {activeTab === 'think' && <ThinkSurface className="p-4" />}
         {activeTab === 'observe' && <ObservabilityDashboard className="p-4" />}
       </div>
 
-      {/* Footer disclaimer */}
       <div className="mt-4 text-xs text-[#71717A] text-center border-t border-[#27272A] pt-3">
         PolyVerses provides AI-powered product management assistance. Always validate AI-generated recommendations against your product context and stakeholder input.
       </div>
     </div>
+    </ErrorBoundary>
   );
 }

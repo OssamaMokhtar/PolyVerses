@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PolySync — AI Fitness Coach Architecture</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  * { font-family: 'Inter', system-ui, sans-serif; }
+  :root { --bg-primary: #0A0A0F; --bg-secondary: #121215; --bg-card: #1A1A20; --border: #27272A; --text: #E4E4E7; --text-muted: #71717A; --accent: #6366F1; --accent-glow: rgba(99,102,241,0.3); --green: #22C55E; --amber: #F59E0B; --red: #EF4444; }
+  body { background: var(--bg-primary); color: var(--text); }
+  .glass { background: rgba(18,18,21,0.85); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; }
+  .glass-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; }
+  .accent-glow { box-shadow: 0 0 30px var(--accent-glow); }
+  .diagram-box { border: 1px solid var(--border); border-radius: 10px; background: rgba(10,10,15,0.6); position: relative; }
+  .agent-node { transition: all 0.3s ease; cursor: pointer; }
+  .agent-node:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(99,102,241,0.25); }
+  .flow-arrow { color: var(--accent); opacity: 0.7; }
+  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.5); } 50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(34,197,94,0); } }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+  .badge-done { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .badge-ongoing { background: rgba(99,102,241,0.15); color: var(--accent); border: 1px solid rgba(99,102,241,0.3); }
+  .badge-planned { background: rgba(245,158,11,0.15); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+  .badge-future { background: rgba(113,113,122,0.15); color: var(--text-muted); border: 1px solid rgba(113,113,122,0.3); }
+  pre { background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+  .timeline-item { border-left: 2px solid var(--accent); padding-left: 20px; margin-left: 10px; position: relative; }
+  .timeline-item::before { content: ''; position: absolute; left: -6px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-primary); }
+  .schema-field { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(39,39,42,0.5); font-size: 13px; }
+  .schema-field .key { color: var(--accent); font-family: monospace; }
+  .schema-field .type { color: var(--text-muted); font-family: monospace; }
+</style>
+</head>
+<body>
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+  <!-- Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 gap-4">
+    <div>
+      <div class="flex items-center gap-3 mb-2">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">P</div>
+        <h1 class="text-3xl font-extrabold tracking-tight">PolySync</h1>
+      </div>
+      <p class="text-lg text-[#71717A]">AI Fitness Coach · Multi-Agent Orchestration Platform</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="badge badge-ongoing"><span class="pulse-dot"></span>v1.1 · 2026-09-12</span>
+      <span class="badge badge-done">✅ Phase 0 Foundation</span>
+      <span class="badge badge-ongoing">🔴 Phase 1 Building</span>
+    </div>
+  </div>
+
+  <!-- Architecture at a Glance -->
+  <div class="glass p-6 mb-8 accent-glow">
+    <div class="flex items-center gap-3 mb-4">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9.75 15m0 0l-2.25 2.25M9.75 15l2.25-2.25M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <h2 class="text-xl font-bold">Architecture at a Glance</h2>
+    </div>
+    <p class="text-[#71717A] text-sm mb-6">PolySync is a <strong>server-rendered React + Vite + TypeScript + Firebase + Express</strong> web application that orchestrates a <strong>12-agent specialist AI mesh</strong> to deliver personalized, adaptive fitness coaching. The Gemini API key is held <strong>server-side</strong> in <code>server.ts</code>; the client calls the app's own API endpoints and never sees the key.</p>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+      <div class="glass-card p-4">
+        <div class="text-2xl mb-1">⚛️</div>
+        <div class="font-semibold text-sm">Frontend</div>
+        <div class="text-xs text-[#71717A] mt-1">React 19 + Vite 6 + TS + Tailwind 4 + Motion + D3 + Recharts</div>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-2xl mb-1">🖥️</div>
+        <div class="font-semibold text-sm">Server</div>
+        <div class="text-xs text-[#71717A] mt-1">Express 4.21 + tsx/esbuild + @google/genai 2.4 + dotenv — port 3000</div>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-2xl mb-1">🔥</div>
+        <div class="font-semibold text-sm">Firebase</div>
+        <div class="text-xs text-[#71717A] mt-1">Auth (Google SSO) + Firestore — 10 user subcollections + public exercise library</div>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-2xl mb-1">🤖</div>
+        <div class="font-semibold text-sm">AI Backend</div>
+        <div class="text-xs text-[#71717A] mt-1">Gemini 3.5 Flash (standard) + Flash Thinking/Pro (reasoning) — server-side only, never in browser</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 text-xs text-[#71717A]">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Inherits PolyVerses' multi-agent orchestration pattern — agent network visualization, observability dashboard, human-in-the-loop gates, and per-agent system prompts — but replaces the PM workbench domain with <strong>fitness coaching domain logic</strong>.
+    </div>
+  </div>
+
+  <!-- System Architecture Diagram -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      <h2 class="text-xl font-bold">System Architecture</h2>
+    </div>
+
+    <!-- ASCII Architecture Diagram rendered as styled HTML -->
+    <div class="bg-[#050508] rounded-lg p-4 font-mono text-xs leading-relaxed overflow-x-auto mb-6 border border-[#1A1A20]">
+      <div class="text-indigo-400 font-bold mb-3">POLYSYNC AI FITNESS COACH — SYSTEM ARCHITECTURE</div>
+      <div class="text-[#71717A]">CLIENT (React SPA) — SERVER (Express + Vite, port 3000)</div>
+      <div class="text-[#71717A] mt-1">═══════════════════════════════════════════════════════</div>
+      <div class="text-[#E4E4E7] mt-2 font-bold">┌─────────────────────────────────────────────────────────────────────────────┐</div>
+      <div class="text-[#E4E4E7]">│                          CLIENT (React SPA / PWA)                            │</div>
+      <div class="text-[#E4E4E7]">│                                                                              │</div>
+      <div class="text-[#E4E4E7]">│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │</div>
+      <div class="text-[#E4E4E7]">│  │  Weekly Plan │  │ Today's      │  │ Progress     │  │ Coach Chat   │     │</div>
+      <div class="text-[#E4E4E7]">│  │  (7-day grid)│  │ Workout      │  │ Dashboard    │  │ (LLM chat)   │     │</div>
+      <div class="text-[#E4E4E7]">│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘     │</div>
+      <div class="text-[#E4E4E7]">│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │</div>
+      <div class="text-[#E4E4E7]">│  │ Onboarding   │  │ Wearable Data│  │ Check-ins    │  │ Settings     │     │</div>
+      <div class="text-[#E4E4E7]">│  │ (fitness     │  │ (sleep/HRV/  │  │ (energy/mood/│  │ (profile edit│     │</div>
+      <div class="text-[#E4E4E7]">│  │  profile)    │  │  RHR trends) │  │  pain/motiva)│  │  + wearables,│     │</div>
+      <div class="text-[#E4E4E7]">│  └──────────────┘  └──────────────┘  └──────────────┘  │  + subscription│     │</div>
+      <div class="text-[#E4E4E7]">│                        ┌─────────────────────────────────┘  + data export│     │</div>
+      <div class="text-[#E4E4E7]">│  ┌───────────────────────────────────────────────────────────────────────┐  │</div>
+      <div class="text-[#E4E4E7]">│  │              Fitness Agent Network (D3 Topology + Heatmap)             │  │</div>
+      <div class="text-[#E4E4E7]">│  │  [F01:Profile] → [F02:WorkoutGen] → [F11:Compliance] → [F05:PlanAdapt]│  │</div>
+      <div class="text-[#E4E4E7]">│  │       ↑              ↑                   ↑                   ↑         │  │</div>
+      <div class="text-[#E4E4E7]">│  │  [F10:DataIngest] [F03:ExerciseLib]  [F07:FormCoach]   [F04:Recovery] │  │</div>
+      <div class="text-[#E4E4E7]">│  │       ↑              │                   │                   │         │  │</div>
+      <div class="text-[#E4E4E7]">│  │       └── HealthKit/GoogleFit/Strava/Garmin/WHOOP/Oura ──┘            │  │</div>
+      <div class="text-[#E4E4E7]">│  │  [F06:CoachingChat] ←→ [F09:Motivation] ←→ [F08:Nutrition]           │  │</div>
+      <div class="text-[#E4E4E7]">│  └───────────────────────────────────────────────────────────────────────┘  │</div>
+      <div class="text-[#E4E4E7]">│  ┌───────────────────────────────────────────────────────────────────────┐  │</div>
+      <div class="text-[#E4E4E7]">│  │              Observability Dashboard (D3 / Recharts)                  │  │</div>
+      <div class="text-[#E4E4E7]">│  │  Agent telemetry heatmap · Coaching quality metrics · Engagement funnel │  │</div>
+      <div class="text-[#E4E4E7]">│  │  Retention cohorts · API cost tracking · Recovery score distribution    │  │</div>
+      <div class="text-[#E4E4E7]">│  └───────────────────────────────────────────────────────────────────────┘  │</div>
+      <div class="text-[#E4E4E7]">└─────────────────────────────────────────────────────────────────────────────┘</div>
+      <div class="text-indigo-400 mt-2 font-bold">                                │  HTTP (REST)</div>
+      <div class="text-indigo-400">                                ▼</div>
+      <div class="text-[#E4E4E7]">┌─────────────────────────────────────────────────────────────────────────────┐</div>
+      <div class="text-[#E4E4E7]">│                      SERVER (Express + Vite, port 3000)                       │</div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <div class="glass-card p-4">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-2">Fitness API Routes</div>
+        <div class="space-y-1 text-xs">
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/profile</span><span class="text-[#71717A] ml-2">→ F01 save/update profile</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">GET</span><span class="text-[#71717A]">/api/fitness/profile</span><span class="text-[#71717A] ml-2">→ F01 get profile</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/generate-plan</span><span class="text-[#71717A] ml-2">→ F02 generate weekly plan</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">GET</span><span class="text-[#71717A]">/api/fitness/plan</span><span class="text-[#71717A] ml-2">→ F02 get current plan</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/log-workout</span><span class="text-[#71717A] ml-2">→ F05 log + adapt</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/adapt-plan</span><span class="text-[#71717A] ml-2">→ F05 manual re-adapt</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/chat</span><span class="text-[#71717A] ml-2">→ F06 coaching chat</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/recovery</span><span class="text-[#71717A] ml-2">→ F04 recovery score</span></div>
+        </div>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-2">More API Routes</div>
+        <div class="space-y-1 text-xs">
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/nutrition</span><span class="text-[#71717A] ml-2">→ F08 nutrition guidance</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/form-cue</span><span class="text-[#71717A] ml-2">→ F07 form cues</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/substitute</span><span class="text-[#71717A] ml-2">→ F03 exercise substitute</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/checkin</span><span class="text-[#71717A] ml-2">→ F09 record check-in</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">GET</span><span class="text-[#71717A]">/api/fitness/progress</span><span class="text-[#71717A] ml-2">→ aggregated progress</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">POST</span><span class="text-[#71717A]">/api/fitness/consent</span><span class="text-[#71717A] ml-2">→ F11 set consent</span></div>
+          <div class="flex justify-between"><span class="text-indigo-400">DELETE</span><span class="text-[#71717A]">/api/fitness/data</span><span class="text-[#71717A] ml-2">→ GDPR/CCPA deletion</span></div>
+        </div>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-2">External Integrations</div>
+        <div class="space-y-1 text-xs">
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500"></span><span>Firebase Auth + Firestore</span></div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-indigo-500"></span><span>Gemini API (server-side)</span></div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Apple HealthKit (future)</span></div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Google Fit (future)</span></div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Strava / Garmin / WHOOP / Oura</span></div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#71717A]"></span><span>Stripe (future — Phase 4)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-xs text-[#71717A] bg-[#050508] rounded-lg p-3 border border-[#1A1A20] mt-3">
+      <strong>All routes:</strong> server-side Gemini 3.5 Flash with agent-specific <code>systemInstruction</code>; sandbox fallback if <code>GEMINI_API_KEY</code> is missing. <strong>Auth:</strong> <code>x-user-id</code> header (Firebase Auth uid). <strong>Dev:</strong> Vite middleware mode. <strong>Prod:</strong> <code>express.static(dist)</code> + SPA fallback.
+    </div>
+  </div>
+
+  <!-- Data Flow Architecture -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+      <h2 class="text-xl font-bold">Data Flow Architecture</h2>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-3 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500"></span> Onboarding Flow</div>
+        <pre class="text-xs leading-relaxed">User signs up (Google OAuth via Firebase Auth)
+    → Onboarding screen: collect fitness profile
+    → POST /api/fitness/profile (F01 validates)
+    → Save to Firestore: users/{uid}/profile
+    → Trigger F02: generate initial weekly plan
+    → Save to Firestore: users/{uid}/plans/{planId}
+    → Redirect to Today's Workout / Weekly Plan</pre>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-3 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-indigo-500"></span> Workout Execution Flow</div>
+        <pre class="text-xs leading-relaxed">User taps today's workout
+    → GET /api/fitness/plan (current plan from Firestore)
+    → User logs sets/reps/weight for each exercise
+    → POST /api/fitness/log-workout (F05)
+    → Save to Firestore: users/{uid}/workouts/{workoutId}
+    → F05 schedules adaptation for end of week
+    → If wearable connected: F10 updates wearableData
+    → F04 recomputes recovery</pre>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-3 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-purple-500"></span> Conversational Coach Flow</div>
+        <pre class="text-xs leading-relaxed">User sends message in Coach Chat
+    → POST /api/fitness/chat (F06)
+    → Server fetches: profile, recent workouts,
+      current plan, latest recovery score
+    → F06 generates response with full context
+    → Saved to Firestore: chatSessions/{sessionId}
+    → Response returned to client</pre>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-3 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span> Daily Digest Flow</div>
+        <pre class="text-xs leading-relaxed">Every morning (cron or scheduled function):
+    → For each active premium user:
+        → Fetch: sleep data (if wearable connected),
+          yesterday's workout (if any), today's plan
+        → Compose digest message
+        → Send push notification via FCM
+    → Log: digest sent timestamp per user</pre>
+      </div>
+    </div>
+
+    <!-- Data Flow Diagram ASCII -->
+    <div class="bg-[#050508] rounded-lg p-4 font-mono text-xs leading-relaxed border border-[#1A1A20]">
+      <div class="text-[#E4E4E7] font-bold mb-2">DATA FLOW — USER ACTION TO FIRESTORE TO SERVER</div>
+      <div class="text-[#71717A] mb-2">──────────────────────────────────────────────────────────────</div>
+      <div class="text-[#E4E4E7]">User Action                          Firestore                          Server</div>
+      <div class="text-[#71717A]">─────────────                        ──────────                          ───────</div>
+      <div class="text-[#E4E4E7]">1. Sign up (Google SSO)         →   users/{uid}/profile/           ← F01 validates</div>
+      <div class="text-[#E4E4E7]">                                                              ← F11 consent gate</div>
+      <div class="text-[#E4E4E7]">2. Complete onboarding          →   users/{uid}/profile/           ← F01 saves</div>
+      <div class="text-[#E4E4E7]">3. Request weekly plan          →   (read profile)                  → F02 generates</div>
+      <div class="text-[#E4E4E7]">                                →   users/{uid}/plans/{planId}/    ← F02 saves plan</div>
+      <div class="text-[#E4E4E7]">4. View weekly plan             →   (read plans/{planId})           ← F02 returns plan</div>
+      <div class="text-[#E4E4E7]">5. Start workout session        →   (read plans/{planId}/days/)    ← F02 returns day</div>
+      <div class="text-[#E4E4E7]">6. Log sets/reps/weight         →   users/{uid}/workouts/{id}/    ← F05 logs</div>
+      <div class="text-[#E4E4E7]">7. Complete workout             →   (update workout status)        → F05 adapts</div>
+      <div class="text-[#E4E4E7]">                                →   users/{uid}/plans/{newPlanId}/ ← F05 saves adapted</div>
+      <div class="text-[#E4E4E7]">8. Connect HealthKit            →   users/{uid}/wearableData/     ← F10 ingests</div>
+      <div class="text-[#E4E4E7]">9. Request recovery score       →   (read wearableData + workouts) → F04 computes</div>
+      <div class="text-[#E4E4E7]">                                →   users/{uid}/recovery/{id}/    ← F04 saves</div>
+      <div class="text-[#E4E4E7]">10. Chat with coach             →   users/{uid}/chatSessions/     ← F06 responds</div>
+      <div class="text-[#E4E4E7]">                                →   (append messages)             ← F06 saves</div>
+      <div class="text-[#E4E4E7]">11. Submit check-in             →   users/{uid}/checkIns/         ← F09 logs</div>
+      <div class="text-[#E4E4E7]">                                →   (trigger if needed)           ← F09 analyzes</div>
+    </div>
+  </div>
+
+  <!-- Agent Mesh Architecture -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+      <h2 class="text-xl font-bold">12-Agent Orchestration Mesh</h2>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- Orchestration Core -->
+      <div class="lg:col-span-3 glass-card p-5 mb-4">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-3">Orchestration Pipeline — Workflow Execution</div>
+        <div class="flex flex-wrap items-center gap-2 text-sm font-mono">
+          <span class="glass-card px-3 py-1.5 text-indigo-400 font-bold">F00 Orchestrator Router</span>
+          <span class="text-[#71717A]">→</span>
+          <span class="glass-card px-3 py-1.5 text-green-400">F01 Profile Agent</span>
+          <span class="text-[#71717A]">→</span>
+          <span class="glass-card px-3 py-1.5 text-purple-400">F02 Workout Generator</span>
+          <span class="text-[#71717A]">→</span>
+          <span class="glass-card px-3 py-1.5 text-red-400">F11 Compliance Gate</span>
+          <span class="text-[#71717A]">→</span>
+          <span class="glass-card px-3 py-1.5 text-cyan-400">F05 Plan Adaptor</span>
+          <span class="text-[#71717A] text-xs self-center">(loop)</span>
+        </div>
+        <div class="mt-2 text-xs text-[#71717A]">Profile → Generate Plan → Compliance Check → Serve Plan → Log Workout → Adapt Plan → (loop)</div>
+      </div>
+
+      <!-- Agent Cards -->
+      <div class="lg:col-span-1 space-y-3">
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center text-white font-bold text-sm">F00</div>
+            <div>
+              <div class="font-semibold text-sm">Orchestrator Router</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Master Coordinator — routes requests; manages multi-agent workflows; idempotency; circuit breaker; conflict resolution (MoE council)</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-done">✅ Reused</span><span class="text-xs text-[#71717A]">Standard route</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-green-600 to-green-800 flex items-center justify-center text-white font-bold text-sm">F01</div>
+            <div>
+              <div class="font-semibold text-sm">Profile Agent</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Validates profile; detects contradictions (e.g., beginner + 5x/week advanced); suggests clarifications; normalizes inputs</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Standard (Flash)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-purple-600 to-purple-800 flex items-center justify-center text-white font-bold text-sm">F02</div>
+            <div>
+              <div class="font-semibold text-sm">Workout Generator</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Generates weekly plan from profile + exercise library; periodization; respects injuries + equipment; daily workouts with sets/reps/rest/RPE</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Reasoning (Flash Thinking)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center text-white font-bold text-sm">F11</div>
+            <div>
+              <div class="font-semibold text-sm">Compliance Gate</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Safety & legal gate — injury conflict check; medical disclaimer; health consent gate; safety thresholds; special mode adjustments (GLP-1, postpartum, hypertension)</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Reasoning (safety-critical)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-600 to-cyan-800 flex items-center justify-center text-white font-bold text-sm">F05</div>
+            <div>
+              <div class="font-semibold text-sm">Plan Adaptor</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Adjusts next week: completed/skipped, recovery score, user feedback, progressive overload; deload weeks when needed</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Reasoning (Flash Thinking)</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lg:col-span-1 space-y-3">
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center text-white font-bold text-sm">F03</div>
+            <div>
+              <div class="font-semibold text-sm">Exercise Library</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Exercise metadata lookup; substitution queries (same muscle groups, similar movement, equipment constraints); form cues + common mistakes</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Standard (lookup)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-600 to-orange-800 flex items-center justify-center text-white font-bold text-sm">F04</div>
+            <div>
+              <div class="font-semibold text-sm">Recovery Analyst</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Wearable data + workout frequency + check-ins → recovery score 0-100; train/reduce/rest recommendation with explanation of factors</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Reasoning (Flash Thinking)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-rose-600 to-rose-800 flex items-center justify-center text-white font-bold text-sm">F06</div>
+            <div>
+              <div class="font-semibold text-sm">Coaching Chat</div>
+              <div class="text-xs text-[#71717A] mt-0.5">NL coach with full user context; routes to specialist knowledge; flags unsafe questions; explains reasoning behind recommendations</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Reasoning (highest quality)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-teal-600 to-teal-800 flex items-center justify-center text-white font-bold text-sm">F07</div>
+            <div>
+              <div class="font-semibold text-sm">Form Coach</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Exercise form cues + common mistakes per exercise; interprets user descriptions of movement feel; suggests form fixes</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Standard (Flash)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-yellow-600 to-yellow-800 flex items-center justify-center text-white font-bold text-sm">F08</div>
+            <div>
+              <div class="font-semibold text-sm">Nutrition Advisor</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Calorie/macro estimation based on profile + goals; meal suggestions; dietary preferences; flags medical nutrition questions; integrates with GLP-1 mode</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Standard (Flash)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-pink-600 to-pink-800 flex items-center justify-center text-white font-bold text-sm">F09</div>
+            <div>
+              <div class="font-semibold text-sm">Motivation Coach</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Check-in + chat tone analysis; dropout risk detection; tone adjustment (encouraging vs. challenging); proactive re-engagement nudges</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Standard + light sentiment</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 agent-node">
+          <div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-gray-600 to-gray-800 flex items-center justify-center text-white font-bold text-sm">F10</div>
+            <div>
+              <div class="font-semibold text-sm">Data Ingest</div>
+              <div class="text-xs text-[#71717A] mt-0.5">Normalizes wearable data from HealthKit/Google Fit/Strava/Garmin/WHOOP/Oura into common schema; handles auth; deduplicates; timestamps; no LLM (ETL, rule-based)</div>
+              <div class="mt-1.5 flex items-center gap-2"><span class="badge badge-ongoing">🔴 Not started</span><span class="text-xs text-[#71717A]">Rule-based (no LLM cost)</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Technology Stack -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+      <h2 class="text-xl font-bold">Technology Stack</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-[#71717A] text-xs uppercase border-b border-[#27272A]">
+            <th class="text-left py-3 px-4 font-semibold">Layer</th>
+            <th class="text-left py-3 px-4 font-semibold">Technology</th>
+            <th class="text-left py-3 px-4 font-semibold">Version</th>
+            <th class="text-left py-3 px-4 font-semibold">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Frontend framework</td><td class="py-3 px-4">React</td><td class="py-3 px-4 text-[#71717A]">19.x</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Build tool</td><td class="py-3 px-4">Vite</td><td class="py-3 px-4 text-[#71717A]">6.x</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Language</td><td class="py-3 px-4">TypeScript</td><td class="py-3 px-4 text-[#71717A]">~5.8</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Styling</td><td class="py-3 px-4">Tailwind CSS</td><td class="py-3 px-4 text-[#71717A]">4.x</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Animation</td><td class="py-3 px-4">Motion (framer-motion successor)</td><td class="py-3 px-4 text-[#71717A]">12.x</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Charts</td><td class="py-3 px-4">Recharts + D3</td><td class="py-3 px-4 text-[#71717A]">3.9 / 7.9</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Icons</td><td class="py-3 px-4">Lucide React</td><td class="py-3 px-4 text-[#71717A]">0.546</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Server runtime</td><td class="py-3 px-4">Express + tsx (dev) / esbuild (prod)</td><td class="py-3 px-4 text-[#71717A]">4.21 / 4.21 / 0.25</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">AI backend</td><td class="py-3 px-4">@google/genai (Gemini)</td><td class="py-3 px-4 text-[#71717A]">2.4</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Auth</td><td class="py-3 px-4">Firebase Auth (Google SSO)</td><td class="py-3 px-4 text-[#71717A]">12.15</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Database</td><td class="py-3 px-4">Firebase Firestore</td><td class="py-3 px-4 text-[#71717A]">12.15</td><td class="py-3 px-4"><span class="badge badge-done">✅</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Deployment</td><td class="py-3 px-4">Node.js server (self-hosted or serverless)</td><td class="py-3 px-4 text-[#71717A]">18+</td><td class="py-3 px-4"><span class="badge badge-planned">🟡 Future</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Future: Push notifications</td><td class="py-3 px-4">Firebase Cloud Messaging</td><td class="py-3 px-4 text-[#71717A]">—</td><td class="py-3 px-4"><span class="badge badge-future">⚪ Future</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Future: Payments</td><td class="py-3 px-4">Stripe</td><td class="py-3 px-4 text-[#71717A]">—</td><td class="py-3 px-4"><span class="badge badge-future">⚪ Future</span></td></tr>
+          <tr class="border-b border-[#1A1A20]"><td class="py-3 px-4 font-medium">Future: Mobile</td><td class="py-3 px-4">React Native or PWA upgrade</td><td class="py-3 px-4 text-[#71717A]">—</td><td class="py-3 px-4"><span class="badge badge-future">⚪ Future</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Firestore Data Model -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+      <h2 class="text-xl font-bold">Firestore Data Model</h2>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-indigo-400">users/{userId}/profile/ → FitnessProfile</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">goal</span><span class="type">'build_muscle' | 'lose_weight' | 'improve_endurance' | 'general_fitness' | 'maintain'</span></div>
+          <div class="schema-field"><span class="key">level</span><span class="type">'beginner' | 'intermediate' | 'advanced'</span></div>
+          <div class="schema-field"><span class="key">injuries</span><span class="type">string[] (e.g. ['right_shoulder', 'lower_back'])</span></div>
+          <div class="schema-field"><span class="key">equipment</span><span class="type">string[] (e.g. ['barbell', 'dumbbells', 'bench'])</span></div>
+          <div class="schema-field"><span class="key">daysPerWeek</span><span class="type">2 | 3 | 4 | 5 | 6</span></div>
+          <div class="schema-field"><span class="key">sessionDuration</span><span class="type">30 | 45 | 60 | 75 | 90 (minutes)</span></div>
+          <div class="schema-field"><span class="key">focus</span><span class="type">string[] (e.g. ['upper_body', 'lower_body', 'core'])</span></div>
+          <div class="schema-field"><span class="key">biometrics?</span><span class="type">{ age, height, weight, gender }</span></div>
+          <div class="schema-field"><span class="key">healthDataConsent</span><span class="type">boolean</span></div>
+          <div class="schema-field"><span class="key">specialMode</span><span class="type">'none' | 'glp1' | 'postpartum' | 'hypertension' | 'injury_rehab'</span></div>
+          <div class="schema-field"><span class="key">createdAt / updatedAt</span><span class="type">timestamp</span></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-green-400">users/{userId}/workouts/{workoutId}/ → WorkoutLogEntry</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">date</span><span class="type">timestamp</span></div>
+          <div class="schema-field"><span class="key">planId</span><span class="type">string</span></div>
+          <div class="schema-field"><span class="key">dayIndex</span><span class="type">number</span></div>
+          <div class="schema-field"><span class="key">workoutName</span><span class="type">string</span></div>
+          <div class="schema-field"><span class="key">focus</span><span class="type">string</span></div>
+          <div class="schema-field"><span class="key">exercises</span><span class="type">ExerciseLog[] — { exerciseId, name, sets: { setNumber, reps, weight, rpe?, completed }[], duration? }</span></div>
+          <div class="schema-field"><span class="key">totalDuration?</span><span class="type">number (minutes)</span></div>
+          <div class="schema-field"><span class="key">rpe?</span><span class="type">number (1-10)</span></div>
+          <div class="schema-field"><span class="key">completed / skipped / modified</span><span class="type">boolean</span></div>
+          <div class="schema-field"><span class="key">substitutions?</span><span class="type">{ exerciseId, reason }[]</span></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-purple-400">users/{userId}/plans/{planId}/ → WeeklyPlan</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">weekNumber</span><span class="type">number</span></div>
+          <div class="schema-field"><span class="key">startDate / endDate</span><span class="type">timestamp</span></div>
+          <div class="schema-field"><span class="key">days</span><span class="type">DailyWorkout[] — { dayIndex, date, recoveryRecommendation?, workouts: Workout[] }</span></div>
+          <div class="schema-field"><span class="key">Workout</span><span class="type">{ workoutId, workoutName, focus, duration, exercises: { exerciseId, name, targetMuscles, equipment, instructions, commonMistakes, substitutionIds, sets, reps, rest, rpeTarget, allowsSubstitution }[] }</span></div>
+          <div class="schema-field"><span class="key">version</span><span class="type">number (increment on adaptation)</span></div>
+          <div class="schema-field"><span class="key">createdAt / updatedAt</span><span class="type">timestamp</span></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-cyan-400">users/{userId}/wearableData/{source}/{timestamp}/ → WearableDataPoint</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">source</span><span class="type">'apple_health' | 'google_fit' | 'strava' | 'garmin' | 'whoop' | 'oura'</span></div>
+          <div class="schema-field"><span class="key">steps? / activeCalories?</span><span class="type">number</span></div>
+          <div class="schema-field"><span class="key">sleepDuration? / sleepStages?</span><span class="type">{ deep, light, rem, awake }</span></div>
+          <div class="schema-field"><span class="key">restingHeartRate? / hrv?</span><span class="type">number (bpm / ms)</span></div>
+          <div class="schema-field"><span class="key">workoutSessions?</span><span class="type">{ duration, type, calories }[]</span></div>
+          <div class="schema-field"><span class="key">ingestedAt</span><span class="type">timestamp</span></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-rose-400">users/{userId}/chatSessions/{sessionId}/ → ChatSession</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">createdAt / lastMessageAt</span><span class="type">timestamp</span></div>
+          <div class="schema-field"><span class="key">contextSnapshot</span><span class="type">{ planId, profileSummary, recentWorkouts }</span></div>
+          <div class="schema-field"><span class="key">messages</span><span class="type">ChatMessage[] — { id, role: 'user'|'assistant'|'system', content, timestamp, agentId?, typingDuration? }</span></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-amber-400">users/{userId}/checkIns/{checkInId}/ → CheckIn</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">date</span><span class="type">timestamp</span></div>
+          <div class="schema-field"><span class="key">workoutId?</span><span class="type">string (if post-workout)</span></div>
+          <div class="schema-field"><span class="key">energyLevel / mood / sleepQuality / motivationLevel</span><span class="type">1 | 2 | 3 | 4 | 5</span></div>
+          <div class="schema-field"><span class="key">painOrIssues? / notes?</span><span class="type">string (free text)</span></div>
+          <div class="schema-field"><span class="key">sleepDuration? / workoutCompleted</span><span class="type">number (minutes) / boolean</span></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-orange-400">users/{userId}/recovery/{assessmentId}/ → RecoveryAssessment</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">assessedAt</span><span class="type">timestamp</span></div>
+          <div class="schema-field"><span class="key">recoveryScore</span><span class="type">number (0-100)</span></div>
+          <div class="schema-field"><span class="key">recommendation</span><span class="type">'train_normal' | 'reduce_volume' | 'reduce_intensity' | 'rest'</span></div>
+          <div class="schema-field"><span class="key">recommendationText</span><span class="type">string (explanation for user)</span></div>
+          <div class="schema-field"><span class="key">factors</span><span class="type">{ name, value, impact: 'positive'|'negative' }[]</span></div>
+          <div class="schema-field"><span class="key">dataSources / dataAgeHours</span><span class="type">string[] / number</span></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <div class="text-sm font-semibold mb-2 text-gray-400">exerciseLibrary/{exerciseId}/ → Exercise (public read-only)</div>
+        <div class="space-y-0.5 text-xs">
+          <div class="schema-field"><span class="key">id / name</span><span class="type">string</span></div>
+          <div class="schema-field"><span class="key">category</span><span class="type">'strength' | 'hypertrophy' | 'mobility' | 'core' | 'cardio' | 'plyometric' | 'endurance'</span></div>
+          <div class="schema-field"><span class="key">targetMuscles / secondaryMuscles</span><span class="type">string[]</span></div>
+          <div class="schema-field"><span class="key">equipment</span><span class="type">string[]</span></div>
+          <div class="schema-field"><span class="key">difficulty</span><span class="type">'beginner' | 'intermediate' | 'advanced'</span></div>
+          <div class="schema-field"><span class="key">instructions / commonMistakes</span><span class="type">string / string[]</span></div>
+          <div class="schema-field"><span class="key">substitutionIds / videoUrl?</span><span class="type">string[] / string</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Security Model -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+      <h2 class="text-xl font-bold">Security Model</h2>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+      <div class="glass-card p-4">
+        <div class="font-semibold mb-2">🔐 Auth & API Security</div>
+        <ul class="space-y-2 text-xs text-[#71717A]">
+          <li><strong>Firebase Google SSO</strong> — single sign-on via Google OAuth; email verification required for write operations</li>
+          <li><strong>API key isolation</strong> — Gemini API key held <strong>server-side only</strong> in <code>server.ts</code>; never shipped to browser; client calls own API endpoints</li>
+          <li><strong>x-user-id header auth</strong> — all /api/fitness/* routes require Firebase Auth uid passed as <code>x-user-id</code> header</li>
+          <li><strong>Sandbox fallback</strong> — if GEMINI_API_KEY is missing, server generates high-fidelity simulated outputs so the app remains functional</li>
+        </ul>
+      </div>
+      <div class="glass-card p-4">
+        <div class="font-semibold mb-2">🛡️ Firestore Security Rules</div>
+        <ul class="space-y-2 text-xs text-[#71717A]">
+          <li><strong>Default-deny</strong> — all access denied unless explicitly allowed</li>
+          <li><strong>Per-user ownership</strong> — users can only read/write their own <code>users/{uid}/...</code> collections</li>
+          <li><strong>Email verification required</strong> — write operations gated on <code>request.auth.token.email_verified</code></li>
+          <li><strong>Validated schemas</strong> — field-level validation for each collection (types, ranges, enums)</li>
+          <li><strong>Immutable fields protected</strong> — <code>createdAt</code>, workout logs cannot be modified after creation</li>
+          <li><strong>Health data consent gate</strong> — wearable data read/write blocked without explicit <code>healthDataConsent</code> flag</li>
+        </ul>
+      </div>
+    </div>
+    <div class="mt-4 glass-card p-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+      <div>
+        <div class="font-semibold mb-1">🏥 Health Data Protection</div>
+        <ul class="space-y-1 text-xs text-[#71717A]">
+          <li>Consent flag gate at API level (F11) + Firestore rules</li>
+          <li>Data encrypted at rest by Firebase</li>
+          <li>Not used for model training</li>
+          <li>GDPR/CCPA deletion pipeline via Firebase Admin SDK</li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-semibold mb-1">⚠️ Compliance & Safety</div>
+        <ul class="space-y-1 text-xs text-[#71717A]">
+          <li>All AI-generated workout content includes fitness disclaimer</li>
+          <li>Medical queries get disclaimer + professional referral</li>
+          <li>F11 Compliance Gate: injury conflict check before serving plans</li>
+          <li>Conservative exercise recommendations for beginners</li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-semibold mb-1">📋 Compliance Checklist</div>
+        <ul class="space-y-1 text-xs text-[#71717A]">
+          <li>GDPR Art. 6 lawful basis (consent for health data)</li>
+          <li>GDPR Art. 17 right to erasure (data deletion pipeline)</li>
+          <li>GDPR Art. 20 right to portability (data export)</li>
+          <li>CCPA opt-out mechanism</li>
+          <li>HIPAA-aware (not a covered entity, but health data treated with care)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deployment Model -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+      <h2 class="text-xl font-bold">Deployment Model</h2>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+      <div class="glass-card p-4">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-2">Development</div>
+        <pre class="text-xs bg-[#050508] p-3 rounded-lg">npm run dev
+    → tsx server.ts
+    → Vite middleware + Express
+    → Hot reload on both
+      frontend + server</pre>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-2">Production Build</div>
+        <pre class="text-xs bg-[#050508] p-3 rounded-lg">npm run build
+    → vite build (frontend → dist/)
+    → esbuild server.ts bundle
+      → dist/server.cjs
+    → node dist/server.cjs
+    → Express serves dist/ + API</pre>
+      </div>
+      <div class="glass-card p-4">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-2">Hosting Options</div>
+        <ul class="space-y-2 text-xs text-[#71717A]">
+          <li><strong>Self-hosted</strong> — Node.js server on VPS / container</li>
+          <li><strong>Serverless</strong> — Vercel, AWS Lambda (with adapter), Google Cloud Run</li>
+          <li><strong>Firebase project</strong> — mythical-hour-zbndl</li>
+          <li><strong>Firestore</strong> — ai-studio-polyverses-619398f7-7b6f-4bfd-a018-f7c56956dd81</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase Progress -->
+  <div class="glass p-6 mb-8">
+    <div class="flex items-center gap-3 mb-5">
+      <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      <h2 class="text-xl font-bold">Implementation Progress</h2>
+    </div>
+    <div class="space-y-4">
+      <div class="timeline-item">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-1">Phase 0: Foundation — COMPLETE ✅</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</span><span><strong>0.6</strong> ExerciseLibrary.ts — 101 exercises across 7 categories</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</span><span><strong>0.7</strong> Firestore rules — 10 collections + consent gate</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</span><span><strong>0.8</strong> types.ts — 33 fitness interfaces</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</span><span><strong>0.11</strong> metadata.json + package.json — PolySync pivot</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</span><span><strong>0.1</strong> Architecture update — README, ARCHITECTURE.md, agent roster</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">✓</span><span><strong>0.2–0.5</strong> PRD, FEATURES_ROADMAP, IMPACT_ANALYSIS, GAP_ANALYSIS</span></div>
+        </div>
+      </div>
+
+      <div class="timeline-item" style="border-left-color: #6366F1;">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-1" style="color: #6366F1;">Phase 0 (continued): Server API — IN PROGRESS 🔴</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs">▶</span><span><strong>0.9</strong> server.ts fitness API routes — 6/16 endpoints built (F01, F11, F02, F03, F05, F09)</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-[#71717A] flex items-center justify-center text-white text-xs">□</span><span><strong>0.9</strong> Remaining: F04 (recovery), F06 (chat), F07 (form-cue), F08 (nutrition), GET /progress, DELETE /data, webhook endpoints</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-[#71717A] flex items-center justify-center text-white text-xs">□</span><span><strong>0.10</strong> AthenaCodeStore.ts — fitness agent code samples (depends on 0.9)</span></div>
+        </div>
+      </div>
+
+      <div class="timeline-item" style="border-left-color: #F59E0B;">
+        <div class="text-xs text-[#71717A] uppercase tracking-wider font-semibold mb-1" style="color: #F59E0B;">Phase 1: Core Coaching Loop — NOT STARTED 🟡</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>1.1</strong> Fitness onboarding UI (Onboarding.tsx rewrite)</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>1.2</strong> F02 Workout Generator Agent + /api/fitness/generate-plan</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>1.3</strong> Weekly Plan View (7-day grid)</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>1.4</strong> Active Workout Session UI (set logging, rest timer)</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>1.5</strong> Workout logging to Firestore</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>1.6</strong> F05 Plan Adaptor + /api/fitness/adapt-plan</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>1.7</strong> Progress Dashboard</span></div>
+          <div class="flex items-center gap-2"><span class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs">□</span><span><strong>App.tsx</strong> tab navigation — replace PM tabs with fitness tabs</span></div>
+        </div>
+      </div>
+
+      <div class="text-xs text-[#71717A]">
+        <strong class="text-indigo-400">MVP Critical Path:</strong> 0.9 → 1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6 (~15-20 person-days). Phase 2 (chat + wearables) and beyond not yet started.
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="text-center py-6 border-t border-[#27272A] mt-8">
+    <p class="text-sm text-[#71717A]">PolySync AI Fitness Coach · Architecture v1.1 · 2026-09-12</p>
+    <p class="text-xs text-[#71717A] mt-1">Inherits PolyVerses orchestration patterns; replaces PM domain with fitness domain. Built with React + Vite + TypeScript + Firebase + Express + Gemini.</p>
+  </div>
+
+</div>
+
+</body>
+</html>
